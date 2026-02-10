@@ -71,12 +71,7 @@ def _resolve_vector_index(request: SearchRequest) -> tuple[str, str, str]:
 
 async def search(request: SearchRequest) -> SearchResponse:
     """Execute a search request and return results."""
-    log.info(
-        "search started",
-        query=request.query,
-        target=request.search_target,
-        mode=request.search_mode,
-    )
+    log.info(f"search started query={request.query} target={request.search_target} mode={request.search_mode}")
 
     needs_fulltext = request.search_mode in ("fulltext", "hybrid")
     needs_vector = request.search_mode in ("vector", "hybrid")
@@ -89,12 +84,7 @@ async def search(request: SearchRequest) -> SearchResponse:
     # Resolve vector index and generate embedding if needed
     if needs_vector:
         index_name, vector_field, embedding_model = _resolve_vector_index(request)
-        log.debug(
-            "vector index resolved",
-            index_name=index_name,
-            vector_field=vector_field,
-            embedding_model=embedding_model,
-        )
+        log.debug(f"vector index resolved index_name={index_name} vector_field={vector_field} embedding_model={embedding_model}")
         query_embedding = await embeddings.generate_query_embedding(
             request.query, embedding_model
         )
@@ -185,5 +175,5 @@ async def search(request: SearchRequest) -> SearchResponse:
         embedding_model_used=embedding_model,
     )
 
-    log.info("search completed", total=response.total)
+    log.info(f"search completed total={response.total}")
     return response

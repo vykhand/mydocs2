@@ -74,7 +74,7 @@ async def _search_documents(
         }
     })
 
-    log.debug("vector documents pipeline", pipeline=pipeline)
+    log.debug(f"vector documents pipeline: {pipeline}")
     raw = await Document.aaggregate(pipeline)
 
     results = []
@@ -153,7 +153,7 @@ async def _search_pages(
         }
     })
 
-    log.debug("vector pages pipeline", pipeline=pipeline)
+    log.debug(f"vector pages pipeline: {pipeline}")
     raw = await DocumentPage.aaggregate(pipeline)
 
     results = []

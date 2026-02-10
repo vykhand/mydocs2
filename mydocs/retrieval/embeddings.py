@@ -8,7 +8,7 @@ log = get_logger(__name__)
 
 async def generate_query_embedding(query: str, model: str) -> list[float]:
     """Generate an embedding vector for a search query."""
-    log.debug("generating query embedding", model=model)
+    log.debug(f"generating query embedding model={model}")
     response = await litellm.aembedding(
         model=model,
         input=[query],

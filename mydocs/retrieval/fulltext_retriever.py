@@ -83,7 +83,7 @@ async def _search_documents(
         }
     })
 
-    log.debug("fulltext documents pipeline", pipeline=pipeline)
+    log.debug(f"fulltext documents pipeline: {pipeline}")
     raw = await Document.aaggregate(pipeline)
 
     results = []
@@ -156,7 +156,7 @@ async def _search_pages(
         }
     })
 
-    log.debug("fulltext pages pipeline", pipeline=pipeline)
+    log.debug(f"fulltext pages pipeline: {pipeline}")
     raw = await DocumentPage.aaggregate(pipeline)
 
     results = []
