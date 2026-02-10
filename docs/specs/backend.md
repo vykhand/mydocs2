@@ -26,8 +26,9 @@ Environment-variable-based configuration for infrastructure settings:
 | `MONGO_DB_NAME` | Yes | MongoDB database name |
 | `AZURE_DI_ENDPOINT` | Yes* | Azure DI endpoint URL |
 | `AZURE_DI_API_KEY` | Yes* | Azure DI API key |
-| `LLM_API_KEY` | Yes | API key for LLM/embedding service (used by litellm) |
-| `LLM_API_BASE` | Yes | Base URL for LLM/embedding service (used by litellm) |
+| `AZURE_OPENAI_API_KEY` | Yes | Azure OpenAI API key (read by litellm for `azure/` models) |
+| `AZURE_OPENAI_API_BASE` | Yes | Azure OpenAI endpoint URL (read by litellm for `azure/` models) |
+| `AZURE_OPENAI_API_VERSION` | No | Azure OpenAI API version (default: `2024-12-01-preview`) |
 | `DATA_FOLDER` | No | Root data folder (default: `./data`) |
 | `CONFIG_ROOT` | No | Root config folder (default: `./config`) |
 | `SERVICE_NAME` | No | Service identifier (default: `mydocs`) |

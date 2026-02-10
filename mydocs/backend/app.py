@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from lightodm import MongoConnection
 
 from mydocs.backend.routes.documents import router as documents_router
+from mydocs.backend.routes.search import router as search_router
 
 
 @asynccontextmanager
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(documents_router)
+    application.include_router(search_router)
 
     @application.get("/health")
     async def health():

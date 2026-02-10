@@ -6,7 +6,7 @@ from mydocs.common.base_config import BaseConfig
 
 
 class EmbeddingConfig(BaseModel):
-    model: str = "text-embedding-3-large"
+    model: str = "azure/text-embedding-3-large"
     field_to_embed: str = "content_markdown"
     target_field: str = "emb_content_markdown_text_embedding_3_large"
     dimensions: int = 3072

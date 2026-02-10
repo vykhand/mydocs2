@@ -208,8 +208,6 @@ class AzureDIDocumentParser(DocumentParser):
                 response = await litellm.aembedding(
                     model=embedding.model,
                     input=[text],
-                    api_key=C.LLM_API_KEY,
-                    api_base=C.LLM_API_BASE,
                 )
                 embedded_doc = [response.data[0]["embedding"]]
                 log.info("Saving embeddings to cache")
@@ -237,8 +235,6 @@ class AzureDIDocumentParser(DocumentParser):
                 response = await litellm.aembedding(
                     model=embedding.model,
                     input=texts,
-                    api_key=C.LLM_API_KEY,
-                    api_base=C.LLM_API_BASE,
                 )
                 embeddings = [item["embedding"] for item in response.data]
                 emb_dict = {p.id: emb for p, emb in zip(self.pages, embeddings)}

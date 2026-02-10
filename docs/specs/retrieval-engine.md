@@ -84,11 +84,10 @@ Embeddings are generated using `litellm.aembedding()`:
 ```python
 import litellm
 
+# litellm reads AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_BASE, AZURE_OPENAI_API_VERSION from env
 response = await litellm.aembedding(
-    model=embedding_config.model,
+    model="azure/text-embedding-3-large",
     input=[text_to_embed],
-    api_key=settings.LLM_API_KEY,
-    api_base=settings.LLM_API_BASE,
 )
 vector = response.data[0]["embedding"]
 ```
@@ -96,7 +95,7 @@ vector = response.data[0]["embedding"]
 This approach:
 - Supports 100+ embedding providers through litellm's unified API
 - Provides async support via `aembedding()`
-- Uses the same `api_key`/`api_base` configuration as the LLM service
+- Uses litellm's built-in Azure OpenAI support (`azure/` model prefix)
 - Returns standard OpenAI-compatible embedding response format
 
 ### 3.3 Vector Index Definition

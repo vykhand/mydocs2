@@ -21,8 +21,9 @@ _ENV_VARS = [
     ("AZURE_DI_ENDPOINT", False),
     ("AZURE_DI_API_KEY", True),
     ("AZURE_DI_API_VERSION", False),
-    ("LLM_API_KEY", True),
-    ("LLM_API_BASE", False),
+    ("AZURE_OPENAI_API_KEY", True),
+    ("AZURE_OPENAI_API_BASE", False),
+    ("AZURE_OPENAI_API_VERSION", False),
 ]
 
 

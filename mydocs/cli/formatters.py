@@ -100,6 +100,39 @@ def format_batch_result(parsed: int, skipped: int, mode: str) -> None:
         print(f"Parsed: {parsed}, Skipped: {skipped}")
 
 
+def format_search_result(response, mode: str) -> None:
+    """Format and print search results."""
+    if mode == "json":
+        print(response.model_dump_json(indent=2))
+    elif mode == "quiet":
+        print(response.total)
+    else:
+        # table and full
+        if response.results:
+            headers = ["#", "Score", "ID", "File", "Page", "Tags"]
+            rows = [
+                [
+                    str(i + 1),
+                    f"{r.score:.4f}",
+                    r.id,
+                    r.file_name or "-",
+                    str(r.page_number) if r.page_number is not None else "-",
+                    ",".join(r.tags) if r.tags else "",
+                ]
+                for i, r in enumerate(response.results)
+            ]
+            print_table(headers, rows)
+        print(f"\n{response.total} results ({response.search_mode} on {response.search_target})")
+
+        if mode == "full" and response.results:
+            print()
+            for i, r in enumerate(response.results):
+                text = r.content_markdown or r.content or ""
+                print(f"--- [{i + 1}] {r.id} ---")
+                print(text)
+                print()
+
+
 def format_config(serialized_config, mode: str) -> None:
     """Format and print configuration."""
     if mode == "json":
