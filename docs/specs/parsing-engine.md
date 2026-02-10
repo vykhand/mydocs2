@@ -1,14 +1,16 @@
 # Parsing Engine Specification
 
 **Package**: `mydocs.parsing`
-**Version**: 1.1
+**Version**: 1.2
 **Status**: Draft
+
+**Related Specs**: [retrieval-engine.md](retrieval-engine.md) (search & embeddings), [backend.md](backend.md) (HTTP API & app config), [migrations.md](migrations.md) (index migrations), [cli.md](cli.md) (CLI interface)
 
 ---
 
 ## 1. Overview
 
-The parsing engine is responsible for ingesting files (initially PDFs), extracting structured content using document intelligence services (initially Azure Document Intelligence), and storing the results as queryable documents with full-text search and vector search capabilities.
+The parsing engine is responsible for ingesting files (initially PDFs), extracting structured content using document intelligence services (initially Azure Document Intelligence), and storing the results as queryable documents.
 
 The engine transforms raw files into a three-level hierarchy:
 
@@ -17,7 +19,9 @@ File -> Document -> DocumentPage
                  -> DocumentElement (embedded in Document)
 ```
 
-Since in mydocs one file always corresponds to one document, the `File` and `Document` are stored in the same MongoDB collection (`documents`) as a unified model. Pages are stored separately in a `pages` collection for granular search and retrieval.
+Since in mydocs one file always corresponds to one document, the `File` and `Document` are stored in the same MongoDB collection (`documents`) as a unified model. Pages are stored separately in a `pages` collection for granular retrieval.
+
+Search and retrieval capabilities are specified in [retrieval-engine.md](retrieval-engine.md). HTTP API contracts are specified in [backend.md](backend.md).
 
 ---
 
@@ -470,118 +474,9 @@ All future parsers must normalize their output to the same `DocumentElement` str
 
 ---
 
-## 7. Search Capabilities
+## 7. Configuration System
 
-### 7.1 Full-Text Search
-
-MongoDB Atlas full-text search indices on:
-- `documents.content` - Search across entire document text
-- `pages.content` - Search within individual pages
-
-Full-text search enables:
-- Keyword and phrase search across all ingested documents
-- Relevance-ranked results
-- Filtering by document tags, file type, status, etc.
-
-**Index definitions** (MongoDB Atlas Search):
-```json
-{
-  "mappings": {
-    "dynamic": false,
-    "fields": {
-      "content": { "type": "string", "analyzer": "lucene.standard" },
-      "tags": { "type": "string", "analyzer": "lucene.keyword" },
-      "file_name": { "type": "string", "analyzer": "lucene.standard" },
-      "status": { "type": "string", "analyzer": "lucene.keyword" },
-      "document_type": { "type": "string", "analyzer": "lucene.keyword" }
-    }
-  }
-}
-```
-
-For the `pages` collection:
-```json
-{
-  "mappings": {
-    "dynamic": false,
-    "fields": {
-      "content": { "type": "string", "analyzer": "lucene.standard" },
-      "document_id": { "type": "string", "analyzer": "lucene.keyword" }
-    }
-  }
-}
-```
-
-### 7.2 Vector Search
-
-Vector embeddings are generated for semantic search using the `litellm` library, which provides a unified interface to multiple embedding providers (OpenAI, Azure OpenAI, Cohere, etc.).
-
-#### 7.2.1 Embedding Configuration
-
-```python
-class EmbeddingConfig(BaseModel):
-    model: str = "text-embedding-3-large"       # litellm model identifier
-    field_to_embed: str = "content_markdown"     # Source field for embedding
-    target_field: str                            # Field name to store the vector
-                                                 # Convention: emb_{field}_{model_slug}
-    dimensions: int = 3072                       # Vector dimensions
-```
-
-#### 7.2.2 Embedding Generation
-
-Embeddings are generated using `litellm.aembedding()`:
-
-```python
-import litellm
-
-response = await litellm.aembedding(
-    model=embedding_config.model,
-    input=[text_to_embed],
-    api_key=settings.LLM_API_KEY,
-    api_base=settings.LLM_API_BASE,
-)
-vector = response.data[0]["embedding"]
-```
-
-This approach:
-- Supports 100+ embedding providers through litellm's unified API
-- Provides async support via `aembedding()`
-- Uses the same `api_key`/`api_base` configuration as the LLM service
-- Returns standard OpenAI-compatible embedding response format
-
-#### 7.2.3 Vector Index Definition
-
-MongoDB Atlas vector search index on the `pages` collection:
-
-```json
-{
-  "fields": [
-    {
-      "type": "vector",
-      "path": "emb_content_markdown_text_embedding_3_large",
-      "similarity": "dotProduct",
-      "numDimensions": 3072
-    },
-    { "type": "filter", "path": "document_id" }
-  ]
-}
-```
-
-#### 7.2.4 Retrieval
-
-Two retriever patterns are supported:
-
-1. **Vector Retriever**: Uses MongoDB Atlas Vector Search aggregation pipeline with `$vectorSearch` stage and pre-filtering by `document_id` to find semantically similar pages. Embedding queries are generated via `litellm.aembedding()`.
-
-2. **Pages Retriever**: Directly fetches specific pages by ID using `DocumentPage.afind()` (used when page numbers are known, e.g., from split/classify results).
-
-Both return pages with their `content_markdown` (or configurable content field) for use as LLM context.
-
----
-
-## 8. Configuration System
-
-### 8.1 Parser Configuration
+### 7.1 Parser Configuration
 
 Parser behavior is controlled via a YAML-based configuration system.
 
@@ -607,7 +502,7 @@ The `BaseConfig` system supports:
 - Recursive field merging (dicts, lists, nested models)
 - Deterministic serialization and hashing for change detection
 
-### 8.2 Configuration File Layout
+### 7.2 Configuration File Layout
 
 ```
 config/
@@ -634,32 +529,13 @@ document_embeddings:
     dimensions: 3072
 ```
 
-### 8.3 Application Configuration
-
-Environment-variable-based configuration for infrastructure settings:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MONGO_URL` | Yes | MongoDB connection URL |
-| `MONGO_USER` | Yes | MongoDB username |
-| `MONGO_PASSWORD` | Yes | MongoDB password |
-| `MONGO_DB_NAME` | Yes | MongoDB database name |
-| `AZURE_DI_ENDPOINT` | Yes* | Azure DI endpoint URL |
-| `AZURE_DI_API_KEY` | Yes* | Azure DI API key |
-| `LLM_API_KEY` | Yes | API key for LLM/embedding service (used by litellm) |
-| `LLM_API_BASE` | Yes | Base URL for LLM/embedding service (used by litellm) |
-| `DATA_FOLDER` | No | Root data folder (default: `./data`) |
-| `CONFIG_ROOT` | No | Root config folder (default: `./config`) |
-| `SERVICE_NAME` | No | Service identifier (default: `mydocs`) |
-| `LOG_LEVEL` | No | Logging level (default: `INFO`, used by tinystructlog) |
-
-*Required when Azure DI parser is used.
+Application-level configuration (environment variables) is documented in [backend.md](backend.md) Section 2.
 
 ---
 
-## 9. Database Architecture
+## 8. Database Architecture
 
-### 9.1 ODM Layer
+### 8.1 ODM Layer
 
 The application uses `lightodm` (Lightweight MongoDB ODM) as its database abstraction layer. Lightodm is installed as a pip dependency and provides:
 - `MongoBaseModel` base class extending Pydantic `BaseModel`
@@ -672,16 +548,15 @@ The application uses `lightodm` (Lightweight MongoDB ODM) as its database abstra
 
 No separate `pymongo` or `motor` dependencies are needed in the application -- they are transitive dependencies of `lightodm`.
 
-### 9.2 Collections
+### 8.2 Collections
 
 | Collection | Model | Composite Key | Description |
 |------------|-------|---------------|-------------|
 | `documents` | `Document` | `[storage_backend, original_path]` | Unified file + document records |
 | `pages` | `DocumentPage` | `[document_id, page_number]` | Individual page content and embeddings |
 
-### 9.3 Indexes
+### 8.3 Standard Indexes
 
-#### Standard Indexes
 ```
 documents:
   - { status: 1 }
@@ -695,14 +570,9 @@ pages:
   - { document_id: 1 }                     # For all pages of a document
 ```
 
-#### Atlas Search Indexes
-- `ft_documents` - Full-text search on `documents.content`
-- `ft_pages` - Full-text search on `pages.content`
+Atlas Search and Vector Search indexes are defined in [retrieval-engine.md](retrieval-engine.md). Index migration scripts are documented in [migrations.md](migrations.md).
 
-#### Atlas Vector Search Indexes
-- `vec_pages_large_dot` - Vector search on page embeddings
-
-### 9.4 Future Database Backends
+### 8.4 Future Database Backends
 
 | Backend | Priority | Notes |
 |---------|----------|-------|
@@ -714,47 +584,7 @@ A database abstraction layer should be designed to allow swapping backends. The 
 
 ---
 
-## 10. Migration System
-
-### 10.1 Index Migrations
-
-Database index migrations are implemented as standalone Python scripts in a `migrations/` directory:
-
-```
-migrations/
-  001_fulltext_documents.py
-  002_fulltext_pages.py
-  003_vector_pages_large_dot.py
-```
-
-Migration scripts use `lightodm.get_database()` to access the MongoDB database and create indexes using pymongo's `SearchIndexModel` API:
-
-```python
-from lightodm import get_database
-from pymongo.operations import SearchIndexModel
-
-db = get_database()
-collection = db["pages"]
-
-definition = {
-    "fields": [
-        {
-            "type": "vector",
-            "path": "emb_content_markdown_text_embedding_3_large",
-            "similarity": "dotProduct",
-            "numDimensions": 3072
-        },
-        {"type": "filter", "path": "document_id"}
-    ]
-}
-
-index_model = SearchIndexModel(definition=definition, name="vec_pages_large_dot", type="vectorSearch")
-collection.create_search_index(model=index_model)
-```
-
----
-
-## 11. Caching Strategy
+## 9. Caching Strategy
 
 The parsing engine supports caching at multiple levels to avoid redundant processing:
 
@@ -771,11 +601,11 @@ Caching is controlled by the `use_cache` flag in `ParserConfig`. When enabled:
 
 ---
 
-## 12. Logging
+## 10. Logging
 
 The application uses `tinystructlog` for structured, context-aware logging throughout the parsing pipeline.
 
-### 12.1 Logger Usage
+### 10.1 Logger Usage
 
 ```python
 from tinystructlog import get_logger
@@ -786,7 +616,7 @@ log.info("Processing document")
 log.error("Parsing failed", exc_info=True)
 ```
 
-### 12.2 Context-Aware Logging
+### 10.2 Context-Aware Logging
 
 Use `set_log_context()` and `log_context()` to attach contextual information (document ID, file name, etc.) to all log messages within a scope:
 
@@ -802,7 +632,7 @@ with log_context(parser="azure_di"):
     log.info("Calling Azure DI")  # Includes parser=azure_di
 ```
 
-### 12.3 Log Output Format
+### 10.3 Log Output Format
 
 Default format: `[timestamp] [LEVEL] [module.function:line] [context_key=value ...] message`
 
@@ -815,279 +645,7 @@ Log level is controlled via `LOG_LEVEL` environment variable (default: `INFO`).
 
 ---
 
-## 13. API Contracts (for FastAPI Backend)
-
-The parsing engine exposes the following operations to be wrapped by FastAPI endpoints:
-
-### 13.1 Ingest Files
-```
-POST /api/v1/documents/ingest
-Body: {
-    "source": "path/to/file/or/folder",
-    "storage_mode": "managed" | "external",
-    "tags": ["optional", "tags"],
-    "recursive": true
-}
-Response: {
-    "documents": [{ "id": "...", "file_name": "...", "status": "new" }],
-    "skipped": [{ "path": "...", "reason": "unsupported_format" }]
-}
-```
-
-### 13.2 Parse Documents
-```
-POST /api/v1/documents/{document_id}/parse
-Body: {
-    "parser_config_override": { ... }    # Optional config overrides
-}
-Response: {
-    "document_id": "...",
-    "status": "parsed",
-    "page_count": 5,
-    "element_count": 42
-}
-```
-
-### 13.3 Batch Parse
-```
-POST /api/v1/documents/parse
-Body: {
-    "document_ids": ["id1", "id2"],       # Optional: specific documents
-    "tags": ["tag1"],                       # Optional: parse all with these tags
-    "status_filter": "new"                  # Optional: parse only with this status
-}
-Response: {
-    "queued": 10,
-    "skipped": 2
-}
-```
-
-### 13.4 Search
-
-A unified search endpoint that supports searching across **pages** or **documents**, using full-text search, vector search, or a hybrid of both.
-
-```
-POST /api/v1/search
-```
-
-#### 13.4.1 Request Body
-
-```json
-{
-    "query": "search terms",
-    "search_target": "pages",
-    "search_mode": "hybrid",
-
-    "fulltext": {
-        "enabled": true,
-        "content_field": "content",
-        "fuzzy": {
-            "enabled": false,
-            "max_edits": 2,
-            "prefix_length": 3
-        },
-        "score_boost": 1.0
-    },
-
-    "vector": {
-        "enabled": true,
-        "index_name": "vec_pages_large_dot",
-        "embedding_model": "text-embedding-3-large",
-        "num_candidates": 100,
-        "score_boost": 1.0
-    },
-
-    "hybrid": {
-        "combination_method": "rrf",
-        "rrf_k": 60,
-        "weights": {
-            "fulltext": 0.5,
-            "vector": 0.5
-        }
-    },
-
-    "filters": {
-        "tags": ["tag1"],
-        "file_type": "pdf",
-        "document_ids": ["id1", "id2"],
-        "status": "parsed",
-        "document_type": "generic"
-    },
-
-    "top_k": 10,
-    "min_score": 0.0,
-    "include_content_fields": ["content", "content_markdown"]
-}
-```
-
-#### 13.4.2 Field Reference
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `query` | string | **required** | Search query text (used for both full-text and vector search) |
-| `search_target` | enum | `"pages"` | What to search: `"pages"` or `"documents"` |
-| `search_mode` | enum | `"hybrid"` | Search strategy: `"fulltext"`, `"vector"`, or `"hybrid"` |
-
-**Full-Text Search Parameters** (`fulltext`):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `fulltext.enabled` | bool | `true` | Whether full-text search is active (auto-set by `search_mode`) |
-| `fulltext.content_field` | string | `"content"` | Field to search: `"content"` (plain text) or `"content_markdown"` |
-| `fulltext.fuzzy.enabled` | bool | `false` | Enable fuzzy matching for typo tolerance |
-| `fulltext.fuzzy.max_edits` | int | `2` | Max Levenshtein edits for fuzzy matching (1-2) |
-| `fulltext.fuzzy.prefix_length` | int | `3` | Number of prefix characters that must match exactly |
-| `fulltext.score_boost` | float | `1.0` | Multiplier for full-text scores in hybrid mode |
-
-**Vector Search Parameters** (`vector`):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `vector.enabled` | bool | `true` | Whether vector search is active (auto-set by `search_mode`) |
-| `vector.index_name` | string | `null` | Atlas Vector Search index name. If `null`, auto-selected from available indices based on `search_target` |
-| `vector.embedding_model` | string | `null` | litellm model ID for query embedding. If `null`, inferred from the selected vector index configuration |
-| `vector.num_candidates` | int | `100` | Number of candidate vectors to consider (higher = more accurate but slower) |
-| `vector.score_boost` | float | `1.0` | Multiplier for vector scores in hybrid mode |
-
-**Hybrid Search Parameters** (`hybrid`):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `hybrid.combination_method` | enum | `"rrf"` | How to combine results: `"rrf"` (Reciprocal Rank Fusion) or `"weighted_sum"` |
-| `hybrid.rrf_k` | int | `60` | RRF smoothing constant (only used when `combination_method` = `"rrf"`) |
-| `hybrid.weights.fulltext` | float | `0.5` | Weight for full-text scores (only used when `combination_method` = `"weighted_sum"`) |
-| `hybrid.weights.vector` | float | `0.5` | Weight for vector scores (only used when `combination_method` = `"weighted_sum"`) |
-
-**Filters** (`filters`):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `filters.tags` | list[str] | `null` | Filter by document tags (AND logic) |
-| `filters.file_type` | string | `null` | Filter by `FileTypeEnum` value |
-| `filters.document_ids` | list[str] | `null` | Restrict search to specific document IDs |
-| `filters.status` | string | `null` | Filter by `DocumentStatusEnum` value |
-| `filters.document_type` | string | `null` | Filter by `DocumentTypeEnum` value |
-
-**Result Control**:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `top_k` | int | `10` | Maximum number of results to return |
-| `min_score` | float | `0.0` | Minimum combined score threshold for results |
-| `include_content_fields` | list[str] | `["content"]` | Which content fields to return in results (e.g., `"content"`, `"content_markdown"`, `"content_html"`) |
-
-#### 13.4.3 Response
-
-```json
-{
-    "results": [
-        {
-            "id": "page_or_document_id",
-            "document_id": "parent_document_id",
-            "page_number": 3,
-            "score": 0.87,
-            "scores": {
-                "fulltext": 0.82,
-                "vector": 0.91
-            },
-            "content": "matched content text...",
-            "content_markdown": "[p0] matched content...",
-            "file_name": "report.pdf",
-            "tags": ["tag1"]
-        }
-    ],
-    "total": 42,
-    "search_target": "pages",
-    "search_mode": "hybrid",
-    "vector_index_used": "vec_pages_large_dot",
-    "embedding_model_used": "text-embedding-3-large"
-}
-```
-
-#### 13.4.4 Search Target Behavior
-
-When `search_target` = `"pages"`:
-- Full-text search queries the `pages.content` field (Atlas Search index: `ft_pages`)
-- Vector search queries page embedding fields (Atlas Vector Search index selected by `vector.index_name`)
-- Filters on `document_ids`, `tags`, `file_type`, `status` are applied via a join/lookup against the parent `documents` collection
-- Results include `page_number` and `document_id`
-
-When `search_target` = `"documents"`:
-- Full-text search queries the `documents.content` field (Atlas Search index: `ft_documents`)
-- Vector search queries document embedding fields (requires a document-level vector index)
-- Filters are applied directly on the `documents` collection
-- Results do not include `page_number`
-
-#### 13.4.5 Vector Index Selection
-
-When multiple vector indices exist (e.g., different embedding models or dimensions), the index is selected as follows:
-
-1. If `vector.index_name` is specified, use that index directly
-2. Otherwise, select the first matching index for the `search_target` collection from the parser configuration (`page_embeddings` or `document_embeddings`)
-3. The `embedding_model` for query embedding is determined from the index's associated `EmbeddingConfig`
-4. If `vector.embedding_model` is explicitly set, it overrides the inferred model (useful for cross-model experimentation)
-
-Available vector indices are listed via:
-```
-GET /api/v1/search/indices
-Response: {
-    "pages": [
-        {
-            "index_name": "vec_pages_large_dot",
-            "embedding_model": "text-embedding-3-large",
-            "field": "emb_content_markdown_text_embedding_3_large",
-            "dimensions": 3072,
-            "similarity": "dotProduct"
-        }
-    ],
-    "documents": [
-        {
-            "index_name": "vec_documents_large_dot",
-            "embedding_model": "text-embedding-3-large",
-            "field": "emb_content_text_embedding_3_large",
-            "dimensions": 3072,
-            "similarity": "dotProduct"
-        }
-    ]
-}
-```
-
-#### 13.4.6 Hybrid Search Pipeline
-
-When `search_mode` = `"hybrid"`, the search executes both full-text and vector searches, then combines results:
-
-1. Run full-text search via Atlas Search `$search` aggregation stage
-2. Run vector search via Atlas Vector Search `$vectorSearch` aggregation stage
-3. Normalize scores from each search to [0, 1] range
-4. Combine using the configured `combination_method`:
-   - **RRF** (`"rrf"`): `score = Σ 1/(rrf_k + rank_i)` across search methods. Robust to score distribution differences.
-   - **Weighted Sum** (`"weighted_sum"`): `score = w_ft * score_ft + w_vec * score_vec`. Requires score normalization for meaningful combination.
-5. Deduplicate results by ID, keeping the highest combined score
-6. Sort by combined score descending, apply `min_score` filter, truncate to `top_k`
-
-### 13.5 Get Document
-```
-GET /api/v1/documents/{document_id}
-Response: { ... full document model ... }
-```
-
-### 13.6 Get Pages
-```
-GET /api/v1/documents/{document_id}/pages
-GET /api/v1/documents/{document_id}/pages/{page_number}
-```
-
-### 13.7 Manage Tags
-```
-POST /api/v1/documents/{document_id}/tags
-Body: { "tags": ["new_tag"] }
-
-DELETE /api/v1/documents/{document_id}/tags/{tag}
-```
-
----
-
-## 14. Package Structure
+## 11. Package Structure
 
 The package is named `mydocs` and managed with `uv`. The parsing engine is a subpackage.
 
@@ -1115,7 +673,35 @@ mydocs2/                            # Project root
         __init__.py
         base.py                     # FileStorage ABC
         local.py                    # LocalFileStorage implementation
-  migrations/
+    retrieval/                      # Retrieval subpackage (see retrieval-engine.md)
+      __init__.py
+      search.py
+      models.py
+      embeddings.py
+      vector_retriever.py
+      fulltext_retriever.py
+      hybrid.py
+    backend/                        # FastAPI backend (see backend.md)
+      __init__.py
+      app.py
+      routes/
+        __init__.py
+        documents.py
+        search.py
+      dependencies.py
+    cli/                            # CLI (see cli.md)
+      __init__.py
+      main.py
+      commands/
+        __init__.py
+        ingest.py
+        parse.py
+        search.py
+        docs.py
+        config.py
+        migrate.py
+      formatters.py
+  migrations/                       # Database migrations (see migrations.md)
     001_fulltext_documents.py
     002_fulltext_pages.py
     003_vector_pages_large_dot.py
@@ -1126,19 +712,24 @@ mydocs2/                            # Project root
   docs/
     specs/
       parsing-engine.md             # This file
+      retrieval-engine.md           # Search & retrieval spec
+      backend.md                    # HTTP API & app config spec
+      migrations.md                 # Database migration spec
+      cli.md                        # CLI spec
 ```
 
 ---
 
-## 15. Dependencies
+## 12. Dependencies
+
+Parsing engine dependencies:
 
 | Package | Purpose |
 |---------|---------|
 | `lightodm` | MongoDB ODM (bundles pymongo + motor) |
 | `pydantic` | Data models and validation (transitive via lightodm) |
 | `azure-ai-documentintelligence` | Azure Document Intelligence client |
-| `litellm` | Unified LLM/embedding API (replaces langchain-openai) |
-| `python-dotenv` | Environment variable loading |
+| `litellm` | Unified embedding API for vector generation |
 | `pyyaml` | YAML configuration loading |
 | `tinystructlog` | Structured context-aware logging |
 
@@ -1146,29 +737,31 @@ mydocs2/                            # Project root
 - `pymongo` / `motor` -- transitive dependencies of `lightodm`, not listed directly
 - `langchain-openai` / `langchain-mongodb` -- replaced by `litellm` for embeddings; vector search uses raw MongoDB aggregation pipelines
 
+Dependencies for other components are listed in their respective specs: [backend.md](backend.md), [retrieval-engine.md](retrieval-engine.md), [cli.md](cli.md).
+
 ---
 
-## 16. Non-Functional Requirements
+## 13. Non-Functional Requirements
 
-### 16.1 Performance
+### 13.1 Performance
 - File ingestion should support batch processing of folders with hundreds of files
 - Parsing should be parallelizable (multiple documents can be parsed concurrently via locking)
 - Embedding generation should support caching to avoid redundant API calls
 
-### 16.2 Reliability
+### 13.2 Reliability
 - Document locking prevents concurrent parsing of the same document
 - Idempotent parsing via lightodm composite keys: re-running on the same file produces the same IDs
 - Parser config hashing detects when re-parsing is needed due to config changes
 - Failed parsing is recorded with status for retry
 
-### 16.3 Extensibility
+### 13.3 Extensibility
 - New parsing engines can be added by implementing `DocumentParser`
 - New storage backends can be added by implementing `FileStorage`
 - New file formats can be added by extending `FileTypeEnum` and format detection
 - New element types can be added by extending `DocumentElementTypeEnum` and HTML/Markdown converters
 - The database layer is abstracted through lightodm; future backends (PostgreSQL, SQLite) would require an equivalent ODM adapter
 
-### 16.4 Observability
+### 13.4 Observability
 - Structured context-aware logging via `tinystructlog` throughout the pipeline
 - Context variables (document_id, file_name, parser engine) attached to log messages
 - Document status tracking for monitoring pipeline health
