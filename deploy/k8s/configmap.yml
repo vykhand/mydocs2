@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mydocs-config
+  namespace: mydocs
+data:
+  parser.yml: |
+    azure_di_model: prebuilt-layout

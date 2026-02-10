@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mydocs-ingress
+  namespace: mydocs
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+spec:
+  rules:
+    - host: mydocs.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui
+                port:
+                  number: 80

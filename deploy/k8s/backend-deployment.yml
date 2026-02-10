@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: mydocs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mydocs-backend
+  template:
+    metadata:
+      labels:
+        app: mydocs-backend
+    spec:
+      containers:
+        - name: backend
+          image: mydocs-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: mydocs-secrets
+          env:
+            - name: DATA_FOLDER
+              value: /app/data
+            - name: CONFIG_ROOT
+              value: /app/config
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: config
+              mountPath: /app/config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mydocs-data
+        - name: config
+          configMap:
+            name: mydocs-config
