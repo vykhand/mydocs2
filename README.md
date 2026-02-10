@@ -96,12 +96,33 @@ LOG_LEVEL=INFO
 ### 3. Run with Docker Compose
 
 ```bash
-docker-compose up --build
+# Build and start all services (foreground)
+docker compose up --build
+
+# Or start in detached (background) mode
+docker compose up --build -d
 ```
 
 This starts:
 - **Backend** at `http://localhost:8000` (API + health check)
 - **UI** at `http://localhost` (serves frontend, proxies `/api/` to backend)
+
+### Stop services
+
+```bash
+# Stop running containers (preserves volumes and images)
+docker compose down
+```
+
+### Cleanup
+
+```bash
+# Stop containers and remove volumes
+docker compose down -v
+
+# Stop containers, remove volumes and built images
+docker compose down -v --rmi local
+```
 
 ### 4. Run database migrations
 
