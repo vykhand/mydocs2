@@ -1,0 +1,133 @@
+from datetime import datetime
+from enum import StrEnum
+from typing import List, Optional
+
+from lightodm import MongoBaseModel, generate_composite_id
+from pydantic import BaseModel, Field
+
+
+# --- Enumerations ---
+
+class FileTypeEnum(StrEnum):
+    UNKNOWN = "unknown"
+    PDF = "pdf"
+    TXT = "txt"
+    DOCX = "docx"
+    XLSX = "xlsx"
+    PPTX = "pptx"
+    JPEG = "jpeg"
+    PNG = "png"
+    BMP = "bmp"
+    TIFF = "tiff"
+
+
+class StorageModeEnum(StrEnum):
+    MANAGED = "managed"
+    EXTERNAL = "external"
+
+
+class StorageBackendEnum(StrEnum):
+    LOCAL = "local"
+    AZURE_BLOB = "azure_blob"
+    S3 = "s3"
+    GCS = "gcs"
+    ONEDRIVE = "onedrive"
+
+
+class DocumentStatusEnum(StrEnum):
+    NEW = "new"
+    PARSING = "parsing"
+    PARSED = "parsed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    NOT_SUPPORTED = "not_supported"
+
+
+class DocumentElementTypeEnum(StrEnum):
+    PARAGRAPH = "paragraph"
+    TABLE = "table"
+    KEY_VALUE_PAIR = "key_value_pair"
+    IMAGE = "image"
+    BARCODE = "barcode"
+
+
+class DocumentTypeEnum(StrEnum):
+    GENERIC = "generic"
+
+
+# --- Embedded Models ---
+
+class FileMetadata(BaseModel):
+    size_bytes: Optional[int] = None
+    mime_type: Optional[str] = None
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+    crc32: Optional[str] = None
+    sha256: Optional[str] = None
+    page_count: Optional[int] = None
+    author: Optional[str] = None
+    title: Optional[str] = None
+    subject: Optional[str] = None
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
+
+
+class DocumentElement(BaseModel):
+    id: str = Field(..., description="Globally unique element ID (deterministic hash)")
+    page_id: str = Field(..., description="Reference to the page containing this element")
+    page_number: int = Field(..., description="1-based page number")
+    offset: int = Field(..., description="Character offset in the original content")
+    short_id: Optional[str] = Field(None, description="Short element reference ID (e.g., p0, t1, kv2)")
+    type: DocumentElementTypeEnum
+    element_data: dict
+
+
+# --- Collection Models ---
+
+class Document(MongoBaseModel):
+    # File-level fields
+    file_name: str
+    file_type: FileTypeEnum
+    original_path: str
+    storage_mode: StorageModeEnum
+    storage_backend: StorageBackendEnum
+    managed_path: Optional[str] = None
+    file_metadata: Optional[FileMetadata] = None
+
+    # Document-level fields
+    status: DocumentStatusEnum = DocumentStatusEnum.NEW
+    document_type: DocumentTypeEnum = DocumentTypeEnum.GENERIC
+    locked: bool = False
+
+    content: Optional[str] = None
+    content_type: Optional[str] = None
+    parser_engine: Optional[str] = None
+    parser_config_hash: Optional[str] = None
+
+    elements: Optional[List[DocumentElement]] = None
+
+    tags: List[str] = Field(default_factory=list)
+
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+
+    class Settings:
+        name = "documents"
+        composite_key = ["storage_backend", "original_path"]
+
+
+class DocumentPage(MongoBaseModel):
+    document_id: str
+    page_number: int
+
+    content: Optional[str] = None
+    content_markdown: Optional[str] = None
+    content_html: Optional[str] = None
+
+    height: Optional[float] = None
+    width: Optional[float] = None
+    unit: Optional[str] = None
+
+    class Settings:
+        name = "pages"
+        composite_key = ["document_id", "page_number"]

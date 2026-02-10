@@ -1,0 +1,16 @@
+[project]
+name = "mydocs"
+version = "0.1.0"
+description = "AI-powered document parsing and information extraction"
+authors = [{name = "Andrey Vykhodtsev", email = "yozhyg@gmail.com"}]
+requires-python = ">=3.13"
+dependencies = [
+    "aiofiles>=24.1.0",
+    "azure-ai-documentintelligence>=1.0.2",
+    "lightodm>=0.2.0",
+    "litellm>=1.80.0",
+    "pydantic>=2.12.0",
+    "python-dotenv>=1.1.0",
+    "pyyaml>=6.0",
+    "tinystructlog>=0.1.2",
+]

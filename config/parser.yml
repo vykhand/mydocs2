@@ -1,0 +1,16 @@
+azure_di_model: prebuilt-layout
+azure_di_kwargs:
+  output_content_format: markdown
+  features:
+    - keyValuePairs
+use_cache: true
+page_embeddings:
+  - model: text-embedding-3-large
+    field_to_embed: content_markdown
+    target_field: emb_content_markdown_text_embedding_3_large
+    dimensions: 3072
+document_embeddings:
+  - model: text-embedding-3-large
+    field_to_embed: content
+    target_field: emb_content_text_embedding_3_large
+    dimensions: 3072
