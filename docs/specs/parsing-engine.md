@@ -862,21 +862,208 @@ Response: {
 }
 ```
 
-### 13.4 Search Documents
+### 13.4 Search
+
+A unified search endpoint that supports searching across **pages** or **documents**, using full-text search, vector search, or a hybrid of both.
+
 ```
-POST /api/v1/documents/search
-Body: {
+POST /api/v1/search
+```
+
+#### 13.4.1 Request Body
+
+```json
+{
     "query": "search terms",
-    "search_type": "fulltext" | "vector" | "hybrid",
+    "search_target": "pages",
+    "search_mode": "hybrid",
+
+    "fulltext": {
+        "enabled": true,
+        "content_field": "content",
+        "fuzzy": {
+            "enabled": false,
+            "max_edits": 2,
+            "prefix_length": 3
+        },
+        "score_boost": 1.0
+    },
+
+    "vector": {
+        "enabled": true,
+        "index_name": "vec_pages_large_dot",
+        "embedding_model": "text-embedding-3-large",
+        "num_candidates": 100,
+        "score_boost": 1.0
+    },
+
+    "hybrid": {
+        "combination_method": "rrf",
+        "rrf_k": 60,
+        "weights": {
+            "fulltext": 0.5,
+            "vector": 0.5
+        }
+    },
+
     "filters": {
         "tags": ["tag1"],
         "file_type": "pdf",
-        "document_ids": ["id1", "id2"]
+        "document_ids": ["id1", "id2"],
+        "status": "parsed",
+        "document_type": "generic"
     },
+
     "top_k": 10,
-    "include_pages": true
+    "min_score": 0.0,
+    "include_content_fields": ["content", "content_markdown"]
 }
 ```
+
+#### 13.4.2 Field Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `query` | string | **required** | Search query text (used for both full-text and vector search) |
+| `search_target` | enum | `"pages"` | What to search: `"pages"` or `"documents"` |
+| `search_mode` | enum | `"hybrid"` | Search strategy: `"fulltext"`, `"vector"`, or `"hybrid"` |
+
+**Full-Text Search Parameters** (`fulltext`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fulltext.enabled` | bool | `true` | Whether full-text search is active (auto-set by `search_mode`) |
+| `fulltext.content_field` | string | `"content"` | Field to search: `"content"` (plain text) or `"content_markdown"` |
+| `fulltext.fuzzy.enabled` | bool | `false` | Enable fuzzy matching for typo tolerance |
+| `fulltext.fuzzy.max_edits` | int | `2` | Max Levenshtein edits for fuzzy matching (1-2) |
+| `fulltext.fuzzy.prefix_length` | int | `3` | Number of prefix characters that must match exactly |
+| `fulltext.score_boost` | float | `1.0` | Multiplier for full-text scores in hybrid mode |
+
+**Vector Search Parameters** (`vector`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `vector.enabled` | bool | `true` | Whether vector search is active (auto-set by `search_mode`) |
+| `vector.index_name` | string | `null` | Atlas Vector Search index name. If `null`, auto-selected from available indices based on `search_target` |
+| `vector.embedding_model` | string | `null` | litellm model ID for query embedding. If `null`, inferred from the selected vector index configuration |
+| `vector.num_candidates` | int | `100` | Number of candidate vectors to consider (higher = more accurate but slower) |
+| `vector.score_boost` | float | `1.0` | Multiplier for vector scores in hybrid mode |
+
+**Hybrid Search Parameters** (`hybrid`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hybrid.combination_method` | enum | `"rrf"` | How to combine results: `"rrf"` (Reciprocal Rank Fusion) or `"weighted_sum"` |
+| `hybrid.rrf_k` | int | `60` | RRF smoothing constant (only used when `combination_method` = `"rrf"`) |
+| `hybrid.weights.fulltext` | float | `0.5` | Weight for full-text scores (only used when `combination_method` = `"weighted_sum"`) |
+| `hybrid.weights.vector` | float | `0.5` | Weight for vector scores (only used when `combination_method` = `"weighted_sum"`) |
+
+**Filters** (`filters`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `filters.tags` | list[str] | `null` | Filter by document tags (AND logic) |
+| `filters.file_type` | string | `null` | Filter by `FileTypeEnum` value |
+| `filters.document_ids` | list[str] | `null` | Restrict search to specific document IDs |
+| `filters.status` | string | `null` | Filter by `DocumentStatusEnum` value |
+| `filters.document_type` | string | `null` | Filter by `DocumentTypeEnum` value |
+
+**Result Control**:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `top_k` | int | `10` | Maximum number of results to return |
+| `min_score` | float | `0.0` | Minimum combined score threshold for results |
+| `include_content_fields` | list[str] | `["content"]` | Which content fields to return in results (e.g., `"content"`, `"content_markdown"`, `"content_html"`) |
+
+#### 13.4.3 Response
+
+```json
+{
+    "results": [
+        {
+            "id": "page_or_document_id",
+            "document_id": "parent_document_id",
+            "page_number": 3,
+            "score": 0.87,
+            "scores": {
+                "fulltext": 0.82,
+                "vector": 0.91
+            },
+            "content": "matched content text...",
+            "content_markdown": "[p0] matched content...",
+            "file_name": "report.pdf",
+            "tags": ["tag1"]
+        }
+    ],
+    "total": 42,
+    "search_target": "pages",
+    "search_mode": "hybrid",
+    "vector_index_used": "vec_pages_large_dot",
+    "embedding_model_used": "text-embedding-3-large"
+}
+```
+
+#### 13.4.4 Search Target Behavior
+
+When `search_target` = `"pages"`:
+- Full-text search queries the `pages.content` field (Atlas Search index: `ft_pages`)
+- Vector search queries page embedding fields (Atlas Vector Search index selected by `vector.index_name`)
+- Filters on `document_ids`, `tags`, `file_type`, `status` are applied via a join/lookup against the parent `documents` collection
+- Results include `page_number` and `document_id`
+
+When `search_target` = `"documents"`:
+- Full-text search queries the `documents.content` field (Atlas Search index: `ft_documents`)
+- Vector search queries document embedding fields (requires a document-level vector index)
+- Filters are applied directly on the `documents` collection
+- Results do not include `page_number`
+
+#### 13.4.5 Vector Index Selection
+
+When multiple vector indices exist (e.g., different embedding models or dimensions), the index is selected as follows:
+
+1. If `vector.index_name` is specified, use that index directly
+2. Otherwise, select the first matching index for the `search_target` collection from the parser configuration (`page_embeddings` or `document_embeddings`)
+3. The `embedding_model` for query embedding is determined from the index's associated `EmbeddingConfig`
+4. If `vector.embedding_model` is explicitly set, it overrides the inferred model (useful for cross-model experimentation)
+
+Available vector indices are listed via:
+```
+GET /api/v1/search/indices
+Response: {
+    "pages": [
+        {
+            "index_name": "vec_pages_large_dot",
+            "embedding_model": "text-embedding-3-large",
+            "field": "emb_content_markdown_text_embedding_3_large",
+            "dimensions": 3072,
+            "similarity": "dotProduct"
+        }
+    ],
+    "documents": [
+        {
+            "index_name": "vec_documents_large_dot",
+            "embedding_model": "text-embedding-3-large",
+            "field": "emb_content_text_embedding_3_large",
+            "dimensions": 3072,
+            "similarity": "dotProduct"
+        }
+    ]
+}
+```
+
+#### 13.4.6 Hybrid Search Pipeline
+
+When `search_mode` = `"hybrid"`, the search executes both full-text and vector searches, then combines results:
+
+1. Run full-text search via Atlas Search `$search` aggregation stage
+2. Run vector search via Atlas Vector Search `$vectorSearch` aggregation stage
+3. Normalize scores from each search to [0, 1] range
+4. Combine using the configured `combination_method`:
+   - **RRF** (`"rrf"`): `score = Σ 1/(rrf_k + rank_i)` across search methods. Robust to score distribution differences.
+   - **Weighted Sum** (`"weighted_sum"`): `score = w_ft * score_ft + w_vec * score_vec`. Requires score normalization for meaningful combination.
+5. Deduplicate results by ID, keeping the highest combined score
+6. Sort by combined score descending, apply `min_score` filter, truncate to `top_k`
 
 ### 13.5 Get Document
 ```
