@@ -86,7 +86,8 @@ class DocumentElement(BaseModel):
 
 class Document(MongoBaseModel):
     # File-level fields
-    file_name: str
+    file_name: str                                      # Managed: <unique_id>.<ext>, External: original name
+    original_file_name: str                             # Always the original file name
     file_type: FileTypeEnum
     original_path: str
     storage_mode: StorageModeEnum

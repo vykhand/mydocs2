@@ -101,6 +101,7 @@ async def ingest_files(
             # Record unsupported but known formats
             doc = Document(
                 file_name=file_path.name,
+                original_file_name=file_path.name,
                 file_type=file_type,
                 original_path=str(file_path.resolve()),
                 storage_mode=storage_mode,
@@ -121,26 +122,35 @@ async def ingest_files(
         mime_type, _ = mimetypes.guess_type(str(file_path))
         file_metadata.mime_type = mime_type
 
-        # Determine managed path
-        managed_path = None
-        if storage_mode == StorageModeEnum.MANAGED:
-            managed_path = await storage.copy_to_managed(str(file_path))
-
+        # Create Document first to get deterministic ID (from composite key)
         doc = Document(
-            file_name=file_path.name,
+            file_name=file_path.name,  # temporary, updated below for managed mode
+            original_file_name=file_path.name,
             file_type=file_type,
             original_path=str(file_path.resolve()),
             storage_mode=storage_mode,
             storage_backend=StorageBackendEnum.LOCAL,
-            managed_path=managed_path,
             file_metadata=file_metadata,
             status=DocumentStatusEnum.NEW,
             tags=tags,
             created_at=datetime.now(),
         )
+        # doc.id is now computed from composite key [storage_backend, original_path]
+
+        if storage_mode == StorageModeEnum.MANAGED:
+            managed_path, managed_file_name = await storage.copy_to_managed(str(file_path), doc.id)
+            doc.managed_path = managed_path
+            doc.file_name = managed_file_name
+        else:
+            # External mode: write sidecar metadata file as <id>.metadata.json
+            sidecar_data = file_metadata.model_dump(exclude_none=True)
+            sidecar_data["original_file_name"] = file_path.name
+            sidecar_data["original_path"] = str(file_path.resolve())
+            await storage.write_metadata_sidecar(str(file_path), doc.id, sidecar_data)
+
         await doc.asave()
         documents.append(doc)
-        log.info(f"Ingested document {doc.id} for file {file_path.name}")
+        log.info(f"Ingested document {doc.id} for file {file_path.name} -> {doc.file_name}")
 
     log.info(f"Ingestion complete: {len(documents)} ingested, {len(skipped)} skipped")
     return documents, skipped

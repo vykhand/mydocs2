@@ -18,21 +18,26 @@ class LocalFileStorage(FileStorage):
         self.managed_root = managed_root or os.path.join(C.DATA_FOLDER, "managed")
         os.makedirs(self.managed_root, exist_ok=True)
 
-    async def copy_to_managed(self, source_path: str) -> str:
-        """Copy a file to managed storage under data/managed/."""
-        file_name = os.path.basename(source_path)
-        managed_path = os.path.join(self.managed_root, file_name)
+    async def copy_to_managed(self, source_path: str, doc_id: str) -> tuple[str, str]:
+        """Copy a file to managed storage as <doc_id>.<original_extension>.
 
-        # Avoid overwriting — add suffix if name collision
-        if os.path.exists(managed_path) and os.path.abspath(source_path) != os.path.abspath(managed_path):
-            base, ext = os.path.splitext(file_name)
-            counter = 1
-            while os.path.exists(managed_path):
-                managed_path = os.path.join(self.managed_root, f"{base}_{counter}{ext}")
-                counter += 1
+        Returns:
+            Tuple of (managed_path, managed_file_name)
+        """
+        _, ext = os.path.splitext(source_path)
+        managed_file_name = f"{doc_id}{ext}"
+        managed_path = os.path.join(self.managed_root, managed_file_name)
 
         shutil.copy2(source_path, managed_path)
-        return managed_path
+        return managed_path, managed_file_name
+
+    async def write_metadata_sidecar(self, source_path: str, doc_id: str, metadata: dict) -> str:
+        """Write <doc_id>.metadata.json alongside the source file."""
+        sidecar_path = os.path.join(os.path.dirname(source_path), f"{doc_id}.metadata.json")
+        async with aiofiles.open(sidecar_path, "w") as f:
+            import json
+            await f.write(json.dumps(metadata, indent=2, default=str))
+        return sidecar_path
 
     async def get_file_bytes(self, path: str) -> bytes:
         """Read file contents as bytes."""
