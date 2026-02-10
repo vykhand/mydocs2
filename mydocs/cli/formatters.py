@@ -133,6 +133,99 @@ def format_search_result(response, mode: str) -> None:
                 print()
 
 
+def format_docs_list(documents, mode: str) -> None:
+    """Format and print a list of documents."""
+    if mode == "json":
+        print(json.dumps(
+            [doc.model_dump(by_alias=False, exclude_none=True) for doc in documents],
+            indent=2,
+            default=str,
+        ))
+    elif mode == "quiet":
+        print(len(documents))
+    else:
+        # table
+        if not documents:
+            print("No documents found.")
+            return
+        headers = ["ID", "File", "Type", "Status", "Tags"]
+        rows = [
+            [
+                doc.id,
+                doc.original_file_name,
+                str(doc.file_type),
+                str(doc.status),
+                ",".join(doc.tags) if doc.tags else "",
+            ]
+            for doc in documents
+        ]
+        print_table(headers, rows)
+
+
+def format_doc_show(document, mode: str) -> None:
+    """Format and print a single document's details."""
+    if mode == "json":
+        print(document.model_dump_json(indent=2))
+    elif mode == "full":
+        _print_doc_table(document)
+        if document.content:
+            print(f"\n--- Content ---\n{document.content}")
+    else:
+        # table
+        _print_doc_table(document)
+
+
+def _print_doc_table(document) -> None:
+    """Print document detail as a key-value table."""
+    page_count = (
+        document.file_metadata.page_count
+        if document.file_metadata and document.file_metadata.page_count
+        else 0
+    )
+    element_count = len(document.elements) if document.elements else 0
+
+    headers = ["Field", "Value"]
+    rows = [
+        ["ID", document.id],
+        ["File", document.original_file_name],
+        ["Type", str(document.file_type)],
+        ["Status", str(document.status)],
+        ["Tags", ",".join(document.tags) if document.tags else ""],
+        ["Pages", str(page_count)],
+        ["Elements", str(element_count)],
+        ["Created", str(document.created_at) if document.created_at else ""],
+        ["Modified", str(document.modified_at) if document.modified_at else ""],
+    ]
+    print_table(headers, rows)
+
+
+def format_doc_pages(pages, mode: str) -> None:
+    """Format and print document pages."""
+    if mode == "json":
+        print(json.dumps(
+            [p.model_dump(by_alias=False, exclude_none=True) for p in pages],
+            indent=2,
+            default=str,
+        ))
+    elif mode == "quiet":
+        print(len(pages))
+    else:
+        # table
+        if not pages:
+            print("No pages found.")
+            return
+        headers = ["Page", "ID", "Content Length"]
+        rows = [
+            [
+                str(p.page_number),
+                p.id,
+                str(len(p.content) if p.content else 0),
+            ]
+            for p in pages
+        ]
+        print_table(headers, rows)
+
+
 def format_config(serialized_config, mode: str) -> None:
     """Format and print configuration."""
     if mode == "json":

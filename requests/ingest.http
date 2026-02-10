@@ -1,0 +1,44 @@
+### Ingest single file (managed mode)
+POST http://localhost:8000/api/v1/documents/ingest
+Content-Type: application/json
+
+{
+  "source": "/Users/vykhand/OneDrive/Documents/SCANS/epson/workforce/Bill_20241211_0001.pdf",
+  "storage_mode": "managed",
+  "tags": ["bill", "test"]
+}
+
+### Ingest multiple files
+POST http://localhost:8000/api/v1/documents/ingest
+Content-Type: application/json
+
+{
+  "source": [
+    "/Users/vykhand/OneDrive/Documents/SCANS/epson/workforce/Bill_20251230_0001.pdf",
+    "/Users/vykhand/OneDrive/Documents/SCANS/epson/workforce/Bill_20251230_0002.pdf",
+    "/Users/vykhand/OneDrive/Documents/SCANS/epson/workforce/Bill_20251230_0003.pdf"
+  ],
+  "storage_mode": "managed",
+  "tags": ["bill", "batch-test"]
+}
+
+### Ingest entire folder recursively
+POST http://localhost:8000/api/v1/documents/ingest
+Content-Type: application/json
+
+{
+  "source": "/Users/vykhand/OneDrive/Documents/SCANS/epson/workforce/travel",
+  "recursive": true,
+  "storage_mode": "managed",
+  "tags": ["travel"]
+}
+
+### Ingest in external mode (no copy)
+POST http://localhost:8000/api/v1/documents/ingest
+Content-Type: application/json
+
+{
+  "source": "/Users/vykhand/OneDrive/Documents/SCANS/epson/workforce/Document_20070222_0001.pdf",
+  "storage_mode": "external",
+  "tags": ["document", "external"]
+}

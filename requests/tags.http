@@ -1,0 +1,18 @@
+### Add tags to a document
+POST http://localhost:8000/api/v1/documents/{{document_id}}/tags
+Content-Type: application/json
+
+{
+  "tags": ["important", "review"]
+}
+
+### Add a single tag
+POST http://localhost:8000/api/v1/documents/{{document_id}}/tags
+Content-Type: application/json
+
+{
+  "tags": ["archived"]
+}
+
+### Remove a tag from a document
+DELETE http://localhost:8000/api/v1/documents/{{document_id}}/tags/review

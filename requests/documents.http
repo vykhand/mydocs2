@@ -1,0 +1,11 @@
+### Get document by ID
+GET http://localhost:8000/api/v1/documents/{{document_id}}
+
+### Get all pages for a document
+GET http://localhost:8000/api/v1/documents/{{document_id}}/pages
+
+### Get specific page of a document
+GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/1
+
+### Get page 2
+GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/2

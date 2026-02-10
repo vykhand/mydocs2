@@ -1,0 +1,114 @@
+### Hybrid search (default)
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "bill payment",
+  "top_k": 5
+}
+
+### Full-text search only
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "invoice total amount",
+  "search_mode": "fulltext",
+  "top_k": 10
+}
+
+### Vector search only
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "payment due date",
+  "search_mode": "vector",
+  "top_k": 5
+}
+
+### Search with tag filter
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "bill",
+  "search_mode": "hybrid",
+  "filters": {
+    "tags": ["bill"]
+  },
+  "top_k": 10
+}
+
+### Search with file type filter
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "document content",
+  "filters": {
+    "file_type": "pdf"
+  },
+  "top_k": 5
+}
+
+### Search documents (not pages)
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "travel expenses",
+  "search_target": "documents",
+  "search_mode": "fulltext",
+  "top_k": 5
+}
+
+### Hybrid search with custom weights
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "monthly bill",
+  "search_mode": "hybrid",
+  "hybrid": {
+    "combination_method": "rrf",
+    "rrf_k": 60,
+    "weights": {
+      "fulltext": 0.3,
+      "vector": 0.7
+    }
+  },
+  "top_k": 10
+}
+
+### Full-text search with fuzzy matching
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "paymnt",
+  "search_mode": "fulltext",
+  "fulltext": {
+    "enabled": true,
+    "fuzzy": {
+      "enabled": true,
+      "max_edits": 2,
+      "prefix_length": 3
+    }
+  },
+  "top_k": 5
+}
+
+### Search with multiple content fields
+POST http://localhost:8000/api/v1/search/
+Content-Type: application/json
+
+{
+  "query": "bill details",
+  "search_mode": "hybrid",
+  "include_content_fields": ["content", "content_markdown"],
+  "top_k": 5
+}
+
+### List vector indices
+GET http://localhost:8000/api/v1/search/indices

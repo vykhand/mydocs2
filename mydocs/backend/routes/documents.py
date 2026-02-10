@@ -1,11 +1,16 @@
 """Document endpoint handlers."""
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+import os
+import re
+from typing import Optional
+
+from fastapi import APIRouter, File, Form, Query, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from mydocs.backend.dependencies import (
     BatchParseRequest,
     BatchParseResponse,
+    DocumentListResponse,
     IngestRequest,
     IngestResponse,
     ParseRequest,
@@ -15,6 +20,7 @@ from mydocs.backend.dependencies import (
 from mydocs.parsing.base_parser import DocumentLockedException
 from mydocs.parsing.models import Document, DocumentPage
 from mydocs.parsing.pipeline import batch_parse, ingest_files, parse_document
+import mydocs.config as C
 
 router = APIRouter(prefix="/api/v1/documents")
 
@@ -23,6 +29,101 @@ def _error(status_code: int, error_code: str, detail: str) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"detail": detail, "error_code": error_code, "status_code": status_code},
+    )
+
+
+MIME_MAP = {
+    "pdf": "application/pdf",
+    "txt": "text/plain",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "bmp": "image/bmp",
+    "tiff": "image/tiff",
+}
+
+
+@router.get("", response_model=DocumentListResponse)
+async def list_documents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    file_type: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None, description="Comma-separated tags"),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc"),
+    search: Optional[str] = Query(None),
+):
+    query = {}
+    if status:
+        query["status"] = status
+    if file_type:
+        query["file_type"] = file_type
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        if tag_list:
+            query["tags"] = {"$all": tag_list}
+    if search:
+        query["original_file_name"] = {"$regex": re.escape(search), "$options": "i"}
+
+    sort_dir = -1 if sort_order == "desc" else 1
+    skip = (page - 1) * page_size
+
+    total = await Document.acount(query)
+    docs = await Document.afind(
+        query,
+        sort=[(sort_by, sort_dir)],
+        skip=skip,
+        limit=page_size,
+    )
+
+    return DocumentListResponse(
+        documents=[d.model_dump(by_alias=False, exclude_none=True) for d in docs],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/upload", response_model=IngestResponse)
+async def upload_files(
+    files: list[UploadFile] = File(...),
+    tags: str = Form(""),
+    storage_mode: str = Form("managed"),
+    parse_after_upload: bool = Form(False),
+):
+    upload_dir = os.path.join(C.DATA_FOLDER, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    saved_paths = []
+    for f in files:
+        dest = os.path.join(upload_dir, f.filename)
+        content = await f.read()
+        with open(dest, "wb") as out:
+            out.write(content)
+        saved_paths.append(dest)
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+    documents, skipped = await ingest_files(
+        source=saved_paths,
+        storage_mode=storage_mode,
+        tags=tag_list,
+    )
+
+    if parse_after_upload:
+        doc_ids = [doc.id for doc in documents]
+        if doc_ids:
+            await batch_parse(document_ids=doc_ids)
+
+    return IngestResponse(
+        documents=[
+            {"id": doc.id, "file_name": doc.file_name, "status": doc.status}
+            for doc in documents
+        ],
+        skipped=skipped,
     )
 
 
@@ -79,6 +180,24 @@ async def get_document(document_id: str):
     return doc.model_dump(by_alias=False, exclude_none=True)
 
 
+@router.get("/{document_id}/file")
+async def get_document_file(document_id: str):
+    doc = await Document.aget(document_id)
+    if not doc:
+        return _error(404, "DOCUMENT_NOT_FOUND", f"Document {document_id} not found")
+
+    file_path = doc.managed_path or doc.original_path
+    if not file_path or not os.path.isfile(file_path):
+        return _error(404, "FILE_NOT_FOUND", f"File not found for document {document_id}")
+
+    media_type = MIME_MAP.get(doc.file_type, "application/octet-stream")
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=doc.original_file_name,
+    )
+
+
 @router.get("/{document_id}/pages")
 async def get_pages(document_id: str):
     doc = await Document.aget(document_id)
@@ -122,3 +241,22 @@ async def remove_tag(document_id: str, tag: str):
     )
     updated = await Document.aget(document_id)
     return updated.model_dump(by_alias=False, exclude_none=True)
+
+
+@router.delete("/{document_id}")
+async def delete_document(document_id: str):
+    doc = await Document.aget(document_id)
+    if not doc:
+        return _error(404, "DOCUMENT_NOT_FOUND", f"Document {document_id} not found")
+
+    # Delete pages
+    await DocumentPage.adelete_many({"document_id": document_id})
+
+    # Delete managed file if it exists
+    if doc.managed_path and os.path.isfile(doc.managed_path):
+        os.remove(doc.managed_path)
+
+    # Delete document
+    await Document.adelete_one({"_id": document_id})
+
+    return Response(status_code=204)

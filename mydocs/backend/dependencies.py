@@ -47,3 +47,10 @@ class BatchParseResponse(BaseModel):
 
 class TagsRequest(BaseModel):
     tags: list[str]
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[dict]
+    total: int
+    page: int
+    page_size: int

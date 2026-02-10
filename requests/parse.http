@@ -1,0 +1,37 @@
+### Parse single document (replace {{document_id}} with actual ID from ingest response)
+POST http://localhost:8000/api/v1/documents/{{document_id}}/parse
+Content-Type: application/json
+
+{}
+
+### Parse single document with config override
+POST http://localhost:8000/api/v1/documents/{{document_id}}/parse
+Content-Type: application/json
+
+{
+  "parser_config_override": {}
+}
+
+### Batch parse by document IDs
+POST http://localhost:8000/api/v1/documents/parse
+Content-Type: application/json
+
+{
+  "document_ids": ["{{document_id_1}}", "{{document_id_2}}"]
+}
+
+### Batch parse by tags
+POST http://localhost:8000/api/v1/documents/parse
+Content-Type: application/json
+
+{
+  "tags": ["bill"]
+}
+
+### Batch parse by status
+POST http://localhost:8000/api/v1/documents/parse
+Content-Type: application/json
+
+{
+  "status_filter": "new"
+}
