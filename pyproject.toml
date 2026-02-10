@@ -12,6 +12,7 @@ dependencies = [
     "litellm>=1.80.0",
     "pydantic>=2.12.0",
     "python-dotenv>=1.1.0",
+    "python-multipart>=0.0.18",
     "pyyaml>=6.0",
     "tinystructlog>=0.1.2",
     "uvicorn>=0.34.0",
