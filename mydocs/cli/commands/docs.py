@@ -3,7 +3,7 @@
 import sys
 
 from mydocs.cli.formatters import format_doc_pages, format_doc_show, format_docs_list
-from mydocs.parsing.models import Document, DocumentPage, DocumentStatusEnum
+from mydocs.models import Document, DocumentPage, DocumentStatusEnum
 
 
 def register(subparsers):

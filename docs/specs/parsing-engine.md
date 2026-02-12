@@ -84,6 +84,8 @@ Files can be imported in two modes:
 
 ## 3. Data Models
 
+> **Note**: Document and page models (`Document`, `DocumentPage`, enums, embedded models) have moved to `mydocs/models.py`. The file `mydocs/parsing/models.py` is a re-export stub that imports everything from `mydocs.models` for backward compatibility.
+
 All collection models extend `MongoBaseModel` from the `lightodm` library. Lightodm provides:
 - Pydantic v2 model validation and serialization
 - `id` field mapped to MongoDB `_id`
@@ -655,12 +657,13 @@ mydocs2/                            # Project root
   mydocs/                           # Main package
     __init__.py
     config.py                       # Application config (env vars)
+    models.py                       # Canonical document/page/case models, enums
     common/
       __init__.py
       base_config.py                # BaseConfig with YAML loading
     parsing/                        # Parsing subpackage
       __init__.py
-      models.py                     # Document, DocumentPage, DocumentElement, enums
+      models.py                     # Re-export stub (imports from mydocs.models)
       config.py                     # ParserConfig, EmbeddingConfig
       base_parser.py                # DocumentParser ABC
       pipeline.py                   # Ingestion and parsing orchestration

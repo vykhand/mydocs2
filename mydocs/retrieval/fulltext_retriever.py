@@ -2,7 +2,7 @@
 
 from tinystructlog import get_logger
 
-from mydocs.parsing.models import Document, DocumentPage
+from mydocs.models import Document, DocumentPage
 from mydocs.retrieval.models import FullTextSearchConfig, SearchFilters
 
 log = get_logger(__name__)

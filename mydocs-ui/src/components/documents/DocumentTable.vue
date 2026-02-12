@@ -3,7 +3,8 @@ import { useRouter } from 'vue-router'
 import { useDocumentsStore } from '@/stores/documents'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
-import { Eye, Play, Trash2 } from 'lucide-vue-next'
+import { Eye, Play, Trash2, Briefcase } from 'lucide-vue-next'
+import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
 import { deleteDocument, parseSingle } from '@/api/documents'
 import { useToast } from 'vue-toastification'
 import { ref } from 'vue'
@@ -71,7 +72,7 @@ function toggleAll() {
           :key="doc.id"
           class="border-t cursor-pointer hover:opacity-90 transition-opacity"
           style="border-color: var(--color-border);"
-          @click="router.push(`/documents/${doc.id}`)"
+          @click="router.push(`/doc/${doc.id}`)"
         >
           <td class="px-3 py-3" @click.stop>
             <input
@@ -114,7 +115,7 @@ function toggleAll() {
           <td class="px-3 py-3" @click.stop>
             <div class="flex items-center gap-1">
               <button
-                @click="router.push(`/documents/${doc.id}`)"
+                @click="router.push(`/doc/${doc.id}`)"
                 class="p-1.5 rounded hover:opacity-70"
                 style="color: var(--color-text-secondary);"
                 title="View"
@@ -129,6 +130,7 @@ function toggleAll() {
               >
                 <Play :size="16" />
               </button>
+              <AddToCaseMenu :document-ids="[doc.id]" />
               <button
                 @click="deleteTarget = doc.id"
                 class="p-1.5 rounded hover:opacity-70"

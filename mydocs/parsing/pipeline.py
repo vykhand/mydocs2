@@ -10,7 +10,7 @@ import mydocs.config as C
 from mydocs.parsing.azure_di.parser import AzureDIDocumentParser
 from mydocs.parsing.base_parser import DocumentLockedException
 from mydocs.parsing.config import ParserConfig
-from mydocs.parsing.models import (
+from mydocs.models import (
     Document,
     DocumentStatusEnum,
     FileTypeEnum,

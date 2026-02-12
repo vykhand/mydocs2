@@ -3,11 +3,20 @@ import { ref, watch } from 'vue'
 
 export type AppMode = 'simple' | 'advanced'
 export type ThemeMode = 'light' | 'dark' | 'system'
+export type ActiveTab = 'documents' | 'cases'
+export type GalleryViewMode = 'grid' | 'list'
 
 export const useAppStore = defineStore('app', () => {
   const mode = ref<AppMode>('simple')
   const theme = ref<ThemeMode>('system')
   const sidebarCollapsed = ref(false)
+
+  // Layout state
+  const viewerOpen = ref(false)
+  const viewerDocumentId = ref<string | null>(null)
+  const viewerPage = ref<number>(1)
+  const activeTab = ref<ActiveTab>('documents')
+  const galleryViewMode = ref<GalleryViewMode>('grid')
 
   function toggleMode() {
     mode.value = mode.value === 'simple' ? 'advanced' : 'simple'
@@ -31,6 +40,18 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
+  function openViewer(id: string, page = 1) {
+    viewerDocumentId.value = id
+    viewerPage.value = page
+    viewerOpen.value = true
+  }
+
+  function closeViewer() {
+    viewerOpen.value = false
+    viewerDocumentId.value = null
+    viewerPage.value = 1
+  }
+
   // Watch for system theme changes
   if (typeof window !== 'undefined') {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -38,7 +59,12 @@ export const useAppStore = defineStore('app', () => {
     })
   }
 
-  return { mode, theme, sidebarCollapsed, toggleMode, setTheme, applyTheme, toggleSidebar }
+  return {
+    mode, theme, sidebarCollapsed,
+    viewerOpen, viewerDocumentId, viewerPage, activeTab, galleryViewMode,
+    toggleMode, setTheme, applyTheme, toggleSidebar,
+    openViewer, closeViewer,
+  }
 }, {
   persist: true,
 })

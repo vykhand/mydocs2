@@ -256,35 +256,9 @@ Cases group related documents for review or investigation.
 | Bulk actions        | Select multiple documents > Remove from Case, Add Tags. |
 | Notes / Activity    | A simple timeline/log of actions taken on the case (document added, status changed, etc.). |
 
-#### Data Model Note
+#### Data Model
 
-Cases are not yet defined in the backend spec. The UI spec assumes the following endpoints will be added:
-
-| Method   | Endpoint                              | Purpose |
-|----------|---------------------------------------|---------|
-| `GET`    | `/api/v1/cases`                       | List cases (with pagination, filters). |
-| `POST`   | `/api/v1/cases`                       | Create a new case. |
-| `GET`    | `/api/v1/cases/{case_id}`             | Get case details. |
-| `PUT`    | `/api/v1/cases/{case_id}`             | Update case metadata. |
-| `DELETE` | `/api/v1/cases/{case_id}`             | Delete a case (does not delete documents). |
-| `POST`   | `/api/v1/cases/{case_id}/documents`   | Assign documents to a case. |
-| `DELETE` | `/api/v1/cases/{case_id}/documents/{document_id}` | Remove a document from a case. |
-
-Assumed backend model:
-
-```python
-class Case(MongoBaseModel):
-    name: str
-    description: Optional[str] = None
-    status: str = "open"  # open, in_review, closed
-    tags: list[str] = []
-    document_ids: list[str] = []
-    created_at: datetime
-    modified_at: datetime
-
-    class Settings:
-        name = "cases"
-```
+The `Case` model is defined in `mydocs/models.py:Case`. See [backend.md](backend.md) Section 3.9 for the full Case API contract (8 endpoints).
 
 ### 3.7 Settings View (`/settings`)
 

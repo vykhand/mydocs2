@@ -9,8 +9,8 @@ page_embeddings:
     field_to_embed: content_markdown
     target_field: emb_content_markdown_text_embedding_3_large
     dimensions: 3072
-document_embeddings:
-  - model: azure/text-embedding-3-large
-    field_to_embed: content
-    target_field: emb_content_text_embedding_3_large
-    dimensions: 3072
+#document_embeddings:
+#  - model: azure/text-embedding-3-large
+#    field_to_embed: content
+#    target_field: emb_content_text_embedding_3_large
+#    dimensions: 3072

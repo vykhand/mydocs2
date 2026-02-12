@@ -13,7 +13,7 @@ defineProps<{
   <div
     class="rounded-lg border p-4 cursor-pointer hover:shadow-md transition-shadow"
     style="border-color: var(--color-border); background-color: var(--color-bg-secondary);"
-    @click="$router.push(`/documents/${document.id}`)"
+    @click="$router.push(`/doc/${document.id}`)"
   >
     <div class="flex items-start gap-3">
       <div

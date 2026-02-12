@@ -5,7 +5,7 @@ from typing import List
 from tinystructlog import get_logger
 
 from mydocs.parsing.config import ParserConfig
-from mydocs.parsing.models import Document, DocumentPage, DocumentStatusEnum
+from mydocs.models import Document, DocumentPage, DocumentStatusEnum
 
 log = get_logger(__name__)
 

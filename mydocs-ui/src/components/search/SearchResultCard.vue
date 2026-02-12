@@ -25,7 +25,7 @@ const snippet = computed(() => {
   <div
     class="rounded-lg border p-4 cursor-pointer hover:shadow-sm transition-shadow"
     style="border-color: var(--color-border); background-color: var(--color-bg-secondary);"
-    @click="router.push(`/documents/${result.document_id}`)"
+    @click="router.push(`/doc/${result.document_id}?page=${result.page_number || 1}&highlight=${encodeURIComponent($route.query.q as string || '')}`)"
   >
     <div class="flex items-start justify-between gap-3 mb-2">
       <div class="flex items-center gap-2">
@@ -43,7 +43,7 @@ const snippet = computed(() => {
         </div>
         <button
           v-if="result.page_number != null"
-          @click.stop="router.push(`/documents/${result.document_id}/view?page=${result.page_number}`)"
+          @click.stop="router.push(`/doc/${result.document_id}?page=${result.page_number}&highlight=${encodeURIComponent($route.query.q as string || '')}`)"
           class="p-1 rounded hover:opacity-70"
           style="color: var(--color-accent);"
           title="View in context"

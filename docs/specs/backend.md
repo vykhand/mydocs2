@@ -271,6 +271,71 @@ Body: { "tags": ["new_tag"] }
 DELETE /api/v1/documents/{document_id}/tags/{tag}
 ```
 
+### 3.9 Cases
+
+Cases group related documents for review or investigation. The `Case` model is defined in `mydocs/models.py`.
+
+#### 3.9.1 List Cases
+```
+GET /api/v1/cases?page=1&page_size=25&search=term
+Response: {
+    "cases": [{ "id": "...", "name": "...", "description": "...", "document_ids": [...], "created_at": "...", "modified_at": "..." }],
+    "total": 42,
+    "page": 1,
+    "page_size": 25
+}
+```
+
+#### 3.9.2 Create Case
+```
+POST /api/v1/cases
+Body: { "name": "Case Name", "description": "Optional description" }
+Response: { ... full case model ... }
+```
+
+#### 3.9.3 Get Case
+```
+GET /api/v1/cases/{case_id}
+Response: { ... full case model ... }
+```
+
+#### 3.9.4 Update Case
+```
+PUT /api/v1/cases/{case_id}
+Body: { "name": "Updated Name", "description": "Updated description" }
+Response: { ... full case model ... }
+```
+
+#### 3.9.5 Delete Case
+```
+DELETE /api/v1/cases/{case_id}
+Response: 204 No Content
+```
+
+#### 3.9.6 Add Documents to Case
+```
+POST /api/v1/cases/{case_id}/documents
+Body: { "document_ids": ["doc_id_1", "doc_id_2"] }
+Response: { ... full case model ... }
+```
+
+#### 3.9.7 Remove Document from Case
+```
+DELETE /api/v1/cases/{case_id}/documents/{document_id}
+Response: { ... full case model ... }
+```
+
+#### 3.9.8 List Documents in Case
+```
+GET /api/v1/cases/{case_id}/documents?page=1&page_size=25
+Response: {
+    "documents": [{ ... document model ... }],
+    "total": 10,
+    "page": 1,
+    "page_size": 25
+}
+```
+
 ---
 
 ## 4. Database Architecture
@@ -287,6 +352,7 @@ Uses `lightodm` (Lightweight MongoDB ODM). See [parsing-engine.md](parsing-engin
 |------------|-------|-------------|
 | `documents` | `Document` | Unified file + document records |
 | `pages` | `DocumentPage` | Individual page content and embeddings |
+| `cases` | `Case` | Document groupings for review/investigation |
 
 ### 4.3 Future Database Backends
 
@@ -335,6 +401,7 @@ mydocs/
       __init__.py
       documents.py              # Ingest, parse, get, tags endpoints
       search.py                 # Search and index listing endpoints
+      cases.py                  # Case CRUD and document assignment endpoints
     dependencies.py             # FastAPI dependency injection
 ```
 
