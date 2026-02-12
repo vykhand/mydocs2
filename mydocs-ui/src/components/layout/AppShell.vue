@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useResponsive } from '@/composables/useResponsive'
 import TopBar from './TopBar.vue'
@@ -9,6 +9,7 @@ import RightViewerPanel from './RightViewerPanel.vue'
 
 const appStore = useAppStore()
 const { isMobile, isTablet, isDesktop, isWide } = useResponsive()
+const viewerPanelWidth = ref(420)
 
 onMounted(() => {
   appStore.applyTheme()
@@ -58,10 +59,12 @@ const showSidebarDrawer = computed(() => {
       <!-- Right viewer panel -->
       <RightViewerPanel
         v-if="appStore.viewerOpen"
+        v-model:panel-width="viewerPanelWidth"
         :class="{
-          'w-[420px] shrink-0 border-l': isWide || isDesktop,
+          'shrink-0 border-l': isWide || isDesktop,
           'fixed inset-0 z-50': isTablet || isMobile,
         }"
+        :style="(isWide || isDesktop) ? { width: viewerPanelWidth + 'px' } : undefined"
       />
     </div>
     <MobileTabBar v-if="isMobile" />

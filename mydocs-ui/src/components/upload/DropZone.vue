@@ -53,7 +53,7 @@ function onFileSelect(e: Event) {
     </p>
     <div class="mt-3">
       <button
-        @click.stop="folderInput?.click()"
+        @click.stop.prevent="folderInput?.click()"
         class="text-xs font-medium px-3 py-1.5 rounded-md border transition-colors"
         style="border-color: var(--color-border); color: var(--color-text-secondary);"
       >

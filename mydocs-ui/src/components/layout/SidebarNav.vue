@@ -17,6 +17,8 @@ const appStore = useAppStore()
 const docsStore = useDocumentsStore()
 
 const showAdvancedFilters = ref(false)
+const showStatusFilter = ref(true)
+const showFileTypeFilter = ref(true)
 
 const tabs = [
   { key: 'documents' as const, label: 'Documents', icon: FileText },
@@ -145,8 +147,15 @@ function removeChip(key: string) {
 
       <!-- Status filter -->
       <div>
-        <p class="text-xs font-medium mb-2 uppercase tracking-wide" style="color: var(--color-text-secondary);">Status</p>
-        <div class="space-y-1">
+        <button
+          @click="showStatusFilter = !showStatusFilter"
+          class="flex items-center gap-1 text-xs font-medium mb-2 uppercase tracking-wide w-full"
+          style="color: var(--color-text-secondary);"
+        >
+          <ChevronDown :size="14" :class="{ 'rotate-180': showStatusFilter }" class="transition-transform" />
+          Status
+        </button>
+        <div v-if="showStatusFilter" class="space-y-1">
           <label
             v-for="opt in statusOptions"
             :key="opt.value"
@@ -166,8 +175,15 @@ function removeChip(key: string) {
 
       <!-- File Type filter -->
       <div>
-        <p class="text-xs font-medium mb-2 uppercase tracking-wide" style="color: var(--color-text-secondary);">File Type</p>
-        <div class="space-y-1">
+        <button
+          @click="showFileTypeFilter = !showFileTypeFilter"
+          class="flex items-center gap-1 text-xs font-medium mb-2 uppercase tracking-wide w-full"
+          style="color: var(--color-text-secondary);"
+        >
+          <ChevronDown :size="14" :class="{ 'rotate-180': showFileTypeFilter }" class="transition-transform" />
+          File Type
+        </button>
+        <div v-if="showFileTypeFilter" class="space-y-1">
           <label
             v-for="opt in fileTypeOptions"
             :key="opt.value"

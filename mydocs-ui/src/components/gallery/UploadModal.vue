@@ -70,7 +70,7 @@ async function handleUpload() {
 
         <!-- Content -->
         <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-          <DropZone @files-added="addFiles" />
+          <DropZone @files="addFiles" />
 
           <div v-if="files.length" class="space-y-3">
             <FileQueue :files="files" @remove="removeFile" />
