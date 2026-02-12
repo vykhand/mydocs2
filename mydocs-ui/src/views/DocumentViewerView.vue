@@ -38,7 +38,7 @@ const viewer = useDocumentViewer(documentId.value, initialPage.value)
         :document="viewer.document.value"
         :current-page="viewer.currentPage.value"
         :zoom="viewer.zoom.value"
-        :file-url="viewer.fileUrl"
+        :file-url="viewer.fileUrl.value"
         @go-to-page="viewer.goToPage"
       />
     </div>

@@ -6,7 +6,7 @@ import sys
 from tinystructlog import get_logger
 
 import mydocs.config as C
-from mydocs.cli.commands import config, docs, ingest, migrate, parse, search
+from mydocs.cli.commands import cases, config, docs, ingest, migrate, parse, search
 
 log = get_logger(__name__)
 
@@ -34,6 +34,7 @@ def parse_args(argv=None):
     config.register(subparsers)
     migrate.register(subparsers)
     search.register(subparsers)
+    cases.register(subparsers)
 
     args = parser.parse_args(argv)
 

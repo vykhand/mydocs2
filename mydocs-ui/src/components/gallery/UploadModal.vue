@@ -80,7 +80,7 @@ async function handleUpload() {
             </div>
           </div>
 
-          <UploadProgress v-if="uploading" :progress="progress" />
+          <UploadProgress v-if="uploading" :progress="progress" :uploading="uploading" :result="null" />
         </div>
 
         <!-- Footer -->

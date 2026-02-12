@@ -1,0 +1,65 @@
+### List all cases
+GET http://localhost:8000/api/v1/cases
+
+### List cases with search
+GET http://localhost:8000/api/v1/cases?search=test
+
+### List cases with pagination
+GET http://localhost:8000/api/v1/cases?page=1&page_size=10
+
+### Create a new case
+POST http://localhost:8000/api/v1/cases
+Content-Type: application/json
+
+{
+  "name": "Test Case",
+  "description": "A test case for verifying the API"
+}
+
+### Create a case without description
+POST http://localhost:8000/api/v1/cases
+Content-Type: application/json
+
+{
+  "name": "Minimal Case"
+}
+
+### Get a case by ID
+GET http://localhost:8000/api/v1/cases/{{case_id}}
+
+### Update a case
+PUT http://localhost:8000/api/v1/cases/{{case_id}}
+Content-Type: application/json
+
+{
+  "name": "Updated Case Name",
+  "description": "Updated description"
+}
+
+### Update only the case name
+PUT http://localhost:8000/api/v1/cases/{{case_id}}
+Content-Type: application/json
+
+{
+  "name": "Renamed Case"
+}
+
+### Delete a case
+DELETE http://localhost:8000/api/v1/cases/{{case_id}}
+
+### Add documents to a case
+POST http://localhost:8000/api/v1/cases/{{case_id}}/documents
+Content-Type: application/json
+
+{
+  "document_ids": ["{{document_id}}"]
+}
+
+### List documents in a case
+GET http://localhost:8000/api/v1/cases/{{case_id}}/documents
+
+### List documents in a case with pagination
+GET http://localhost:8000/api/v1/cases/{{case_id}}/documents?page=1&page_size=10
+
+### Remove a document from a case
+DELETE http://localhost:8000/api/v1/cases/{{case_id}}/documents/{{document_id}}

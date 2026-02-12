@@ -1,3 +1,27 @@
+### List all documents
+GET http://localhost:8000/api/v1/documents
+
+### List documents with status filter
+GET http://localhost:8000/api/v1/documents?status=parsed
+
+### List documents with file type filter
+GET http://localhost:8000/api/v1/documents?file_type=pdf
+
+### List documents with document type filter
+GET http://localhost:8000/api/v1/documents?document_type=generic
+
+### List documents with date range filter
+GET http://localhost:8000/api/v1/documents?date_from=2024-01-01&date_to=2025-12-31
+
+### List documents with combined filters
+GET http://localhost:8000/api/v1/documents?status=parsed&file_type=pdf&page=1&page_size=10
+
+### List documents with tags filter
+GET http://localhost:8000/api/v1/documents?tags=important
+
+### List documents sorted by name
+GET http://localhost:8000/api/v1/documents?sort_by=original_file_name&sort_order=asc
+
 ### Get document by ID
 GET http://localhost:8000/api/v1/documents/{{document_id}}
 

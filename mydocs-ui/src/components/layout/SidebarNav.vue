@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useDocumentsStore } from '@/stores/documents'
 import { FileText, Briefcase, Filter, ChevronDown } from 'lucide-vue-next'
 import TagInput from '@/components/common/TagInput.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 defineProps<{
   collapsed: boolean
@@ -238,7 +237,7 @@ function removeChip(key: string) {
         <div v-if="showAdvancedFilters" class="mt-2 space-y-3">
           <div>
             <p class="text-xs mb-1" style="color: var(--color-text-secondary);">Tags</p>
-            <TagInput v-model="docsStore.filters.tags ? docsStore.filters.tags.split(',') : []" @update:model-value="(v: string[]) => { docsStore.filters.tags = v.length ? v.join(',') : undefined; syncFiltersToUrl() }" />
+            <TagInput :model-value="docsStore.filters.tags ? docsStore.filters.tags.split(',') : []" @update:model-value="(v: string[]) => { docsStore.filters.tags = v.length ? v.join(',') : undefined; syncFiltersToUrl() }" />
           </div>
           <div>
             <p class="text-xs mb-1" style="color: var(--color-text-secondary);">Date Range</p>

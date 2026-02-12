@@ -59,6 +59,7 @@ mydocs/
       parse.py                  # mydocs parse
       search.py                 # mydocs search
       docs.py                   # mydocs docs
+      cases.py                  # mydocs cases
       config.py                 # mydocs config
       migrate.py                # mydocs migrate
     formatters.py               # Output formatting (table, json, quiet, full)
@@ -167,6 +168,51 @@ mydocs migrate run                  # Run all pending migrations
 mydocs migrate list                 # List available migration scripts
 ```
 
+### 4.7 `mydocs cases`
+
+Case management subcommands.
+
+```
+mydocs cases list                       # List all cases
+    --search <term>                     # Search cases by name
+    --output json|table|quiet           # Output format (default: table)
+
+mydocs cases show <case_id>             # Show case details
+    --output json|table                 # Output format (default: table)
+
+mydocs cases create <name>              # Create a new case
+    --description "text"                # Optional description
+    --output json|table                 # Output format (default: table)
+
+mydocs cases update <case_id>           # Update a case
+    --name "new name"                   # New case name
+    --description "new desc"            # New case description
+    --output json|table                 # Output format (default: table)
+
+mydocs cases delete <case_id>           # Delete a case
+    --force                             # Skip confirmation prompt
+
+mydocs cases add-docs <case_id> <ids>   # Add documents to a case
+                                        # <ids> is comma-separated doc IDs
+
+mydocs cases remove-doc <case_id> <id>  # Remove a document from a case
+
+mydocs cases docs <case_id>             # List documents in a case
+    --output json|table|quiet           # Output format (default: table)
+```
+
+**Examples**:
+```bash
+mydocs cases list
+mydocs cases create "Q4 Invoices" --description "All invoices from Q4 2024"
+mydocs cases show abc123
+mydocs cases update abc123 --name "Q4 2024 Invoices"
+mydocs cases add-docs abc123 doc1,doc2,doc3
+mydocs cases docs abc123
+mydocs cases remove-doc abc123 doc1
+mydocs cases delete abc123 --force
+```
+
 ---
 
 ## 5. Output Formatting
@@ -243,6 +289,7 @@ mydocs2/                            # Project root
         parse.py
         search.py
         docs.py
+        cases.py
         config.py
         migrate.py
       formatters.py                 # Output formatting utilities
