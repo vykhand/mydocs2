@@ -60,7 +60,8 @@ router.beforeEach((to, _from) => {
   // Open viewer from /doc/:id params
   if (to.name === 'doc-viewer' && to.params.id) {
     const page = Number(to.query.page) || 1
-    appStore.openViewer(to.params.id as string, page)
+    const highlight = decodeURIComponent((to.query.highlight as string) || '')
+    appStore.openViewer(to.params.id as string, page, highlight)
   } else if (to.name !== 'doc-viewer') {
     // Close viewer when navigating away from doc routes
     if (appStore.viewerOpen && !to.path.startsWith('/doc/')) {

@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { useResponsive } from '@/composables/useResponsive'
 import { useDocumentViewer } from '@/composables/useDocumentViewer'
 import DocumentViewer from '@/components/viewer/DocumentViewer.vue'
-import { X, Maximize2, ChevronDown } from 'lucide-vue-next'
+import { X, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Info } from 'lucide-vue-next'
 import { ref } from 'vue'
 
 const panelWidth = defineModel<number>('panelWidth', { default: 420 })
@@ -14,10 +14,7 @@ const appStore = useAppStore()
 const route = useRoute()
 const { isMobile, isTablet } = useResponsive()
 
-const showDuplicates = ref(false)
-const showMetadata = ref(false)
-const showTags = ref(true)
-const showAdvanced = ref(false)
+const showInfoPanel = ref(false)
 
 const documentId = computed(() => appStore.viewerDocumentId)
 
@@ -29,6 +26,18 @@ watch(() => route.query.page, (p) => {
     viewer.goToPage(Number(p))
   }
 })
+
+// Watch appStore.viewerPage for changes from search result navigation
+watch(() => appStore.viewerPage, (newPage) => {
+  if (newPage && viewer) {
+    viewer.goToPage(newPage)
+  }
+})
+
+// Handle totalPagesResolved from PdfViewer
+function onTotalPagesResolved(total: number) {
+  viewer.totalPages.value = total
+}
 
 // Horizontal resize handle logic
 const isResizing = ref(false)
@@ -53,36 +62,16 @@ function onResizeEnd() {
   document.removeEventListener('mouseup', onResizeEnd)
 }
 
-// Vertical resize handle logic for preview area
-const previewHeight = ref(400)
-const isResizingVertical = ref(false)
-const previewRef = ref<HTMLElement>()
-
-function onVerticalResizeStart(e: MouseEvent) {
-  e.preventDefault()
-  isResizingVertical.value = true
-  document.addEventListener('mousemove', onVerticalResizeMove)
-  document.addEventListener('mouseup', onVerticalResizeEnd)
-}
-
-function onVerticalResizeMove(e: MouseEvent) {
-  if (!isResizingVertical.value || !previewRef.value) return
-  const rect = previewRef.value.getBoundingClientRect()
-  const newHeight = e.clientY - rect.top
-  previewHeight.value = Math.min(window.innerHeight * 0.8, Math.max(150, newHeight))
-}
-
-function onVerticalResizeEnd() {
-  isResizingVertical.value = false
-  document.removeEventListener('mousemove', onVerticalResizeMove)
-  document.removeEventListener('mouseup', onVerticalResizeEnd)
-}
+// Search result navigation
+const hasSearchResults = computed(() => appStore.viewerSearchResults.length > 0)
+const searchResultLabel = computed(() => {
+  if (!hasSearchResults.value) return ''
+  return `Result ${appStore.viewerCurrentResultIndex + 1} of ${appStore.viewerSearchResults.length}`
+})
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
-  document.removeEventListener('mousemove', onVerticalResizeMove)
-  document.removeEventListener('mouseup', onVerticalResizeEnd)
 })
 </script>
 
@@ -107,6 +96,14 @@ onBeforeUnmount(() => {
       </h3>
       <div class="flex items-center gap-1">
         <button
+          @click="showInfoPanel = !showInfoPanel"
+          class="p-1 rounded hover:opacity-70"
+          :style="{ color: showInfoPanel ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
+          title="Document Info"
+        >
+          <Info :size="16" />
+        </button>
+        <button
           class="p-1 rounded hover:opacity-70"
           style="color: var(--color-text-secondary);"
           title="Maximize"
@@ -124,140 +121,145 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Content -->
-    <div class="flex-1 overflow-y-auto">
+    <!-- Content area: PDF viewer fills available space -->
+    <div class="flex-1 min-h-0 relative">
       <!-- Loading spinner -->
-      <div v-if="viewer.loading.value" class="flex items-center justify-center h-48">
+      <div v-if="viewer.loading.value" class="flex items-center justify-center h-full">
         <div class="animate-spin w-6 h-6 border-2 border-t-transparent rounded-full" style="border-color: var(--color-accent); border-top-color: transparent;" />
       </div>
-      <div v-else>
-        <!-- Document preview -->
-        <div v-if="viewer.document.value" ref="previewRef" class="relative border-b" style="border-color: var(--color-border);">
-          <DocumentViewer
-            :document="viewer.document.value"
-            :current-page="viewer.currentPage.value"
-            :zoom="viewer.zoom.value"
-            :file-url="viewer.fileUrl.value"
-            @go-to-page="viewer.goToPage"
-            :style="{ height: previewHeight + 'px' }"
-          />
-          <!-- Vertical resize handle -->
-          <div
-            class="absolute bottom-0 left-0 right-0 h-1.5 cursor-row-resize z-10 hover:bg-[var(--color-accent)]/20 transition-colors"
-            :style="{ backgroundColor: isResizingVertical ? 'var(--color-accent)' : 'transparent' }"
-            @mousedown="onVerticalResizeStart"
-          />
-        </div>
 
-        <div class="p-4">
-          <!-- Document info -->
-          <div class="mb-4">
-            <p class="text-sm" style="color: var(--color-text-secondary);">
-              {{ viewer.totalPages.value || 0 }} pages
-            </p>
-            <!-- Page navigation -->
-            <div class="flex items-center gap-2 mt-2">
-              <button
-                @click="viewer.prevPage()"
-                :disabled="viewer.currentPage.value === 1"
-                class="px-2 py-1 text-xs rounded border disabled:opacity-40"
-                style="border-color: var(--color-border); color: var(--color-text-primary);"
-              >
-                Prev
-              </button>
-              <span class="text-xs" style="color: var(--color-text-secondary);">
-                Page {{ viewer.currentPage.value }} / {{ viewer.totalPages.value }}
-              </span>
-              <button
-                @click="viewer.nextPage()"
-                :disabled="viewer.currentPage.value === viewer.totalPages.value"
-                class="px-2 py-1 text-xs rounded border disabled:opacity-40"
-                style="border-color: var(--color-border); color: var(--color-text-primary);"
-              >
-                Next
-              </button>
+      <!-- Document viewer (full height) -->
+      <DocumentViewer
+        v-else-if="viewer.document.value"
+        :document="viewer.document.value"
+        :current-page="viewer.currentPage.value"
+        :zoom="viewer.zoom.value"
+        :file-url="viewer.fileUrl.value"
+        :highlight-query="appStore.viewerHighlightQuery"
+        @go-to-page="viewer.goToPage"
+        class="h-full"
+      />
+
+      <!-- Info panel slide-over -->
+      <Transition name="slide">
+        <div
+          v-if="showInfoPanel && viewer.document.value"
+          class="absolute top-0 right-0 bottom-0 w-72 overflow-y-auto border-l z-20"
+          style="background-color: var(--color-bg-secondary); border-color: var(--color-border);"
+        >
+          <div class="p-4 space-y-0">
+            <!-- Metadata -->
+            <div class="py-3">
+              <p class="text-xs font-medium uppercase tracking-wide mb-2" style="color: var(--color-text-secondary);">Metadata</p>
+              <div class="space-y-1 text-xs" style="color: var(--color-text-secondary);">
+                <p v-if="viewer.document.value?.file_type">Type: {{ viewer.document.value.file_type }}</p>
+                <p v-if="viewer.document.value?.status">Status: {{ viewer.document.value.status }}</p>
+                <p v-if="viewer.document.value?.file_metadata?.size_bytes">Size: {{ Math.round((viewer.document.value.file_metadata.size_bytes || 0) / 1024) }}KB</p>
+                <p v-if="viewer.document.value?.file_metadata?.author">Author: {{ viewer.document.value.file_metadata.author }}</p>
+                <p v-if="viewer.document.value?.created_at">Created: {{ new Date(viewer.document.value.created_at).toLocaleDateString() }}</p>
+              </div>
             </div>
-          </div>
 
-          <!-- Collapsible sections -->
-
-          <!-- Metadata -->
-          <div class="border-t py-3" style="border-color: var(--color-border);">
-            <button
-              @click="showMetadata = !showMetadata"
-              class="flex items-center justify-between w-full text-sm font-medium"
-              style="color: var(--color-text-primary);"
-            >
-              Metadata
-              <ChevronDown :size="14" :class="{ 'rotate-180': showMetadata }" class="transition-transform" />
-            </button>
-            <div v-if="showMetadata" class="mt-2 space-y-1 text-xs" style="color: var(--color-text-secondary);">
-              <p v-if="viewer.document.value?.file_type">Type: {{ viewer.document.value.file_type }}</p>
-              <p v-if="viewer.document.value?.status">Status: {{ viewer.document.value.status }}</p>
-              <p v-if="viewer.document.value?.file_metadata?.size_bytes">Size: {{ Math.round((viewer.document.value.file_metadata.size_bytes || 0) / 1024) }}KB</p>
-              <p v-if="viewer.document.value?.file_metadata?.author">Author: {{ viewer.document.value.file_metadata.author }}</p>
-              <p v-if="viewer.document.value?.created_at">Created: {{ new Date(viewer.document.value.created_at).toLocaleDateString() }}</p>
+            <!-- Tags -->
+            <div class="border-t py-3" style="border-color: var(--color-border);">
+              <p class="text-xs font-medium uppercase tracking-wide mb-2" style="color: var(--color-text-secondary);">Tags</p>
+              <div class="flex flex-wrap gap-1">
+                <span
+                  v-for="tag in viewer.document.value?.tags"
+                  :key="tag"
+                  class="px-2 py-0.5 rounded text-xs"
+                  style="background-color: var(--color-bg-tertiary); color: var(--color-text-secondary);"
+                >
+                  {{ tag }}
+                </span>
+                <span v-if="!viewer.document.value?.tags?.length" class="text-xs" style="color: var(--color-text-secondary);">
+                  No tags
+                </span>
+              </div>
             </div>
-          </div>
 
-          <!-- Tags -->
-          <div class="border-t py-3" style="border-color: var(--color-border);">
-            <button
-              @click="showTags = !showTags"
-              class="flex items-center justify-between w-full text-sm font-medium"
-              style="color: var(--color-text-primary);"
-            >
-              Tags
-              <ChevronDown :size="14" :class="{ 'rotate-180': showTags }" class="transition-transform" />
-            </button>
-            <div v-if="showTags" class="mt-2 flex flex-wrap gap-1">
-              <span
-                v-for="tag in viewer.document.value?.tags"
-                :key="tag"
-                class="px-2 py-0.5 rounded text-xs"
-                style="background-color: var(--color-bg-tertiary); color: var(--color-text-secondary);"
-              >
-                {{ tag }}
-              </span>
-              <span v-if="!viewer.document.value?.tags?.length" class="text-xs" style="color: var(--color-text-secondary);">
-                No tags
-              </span>
-            </div>
-          </div>
-
-          <!-- Duplicates -->
-          <div class="border-t py-3" style="border-color: var(--color-border);">
-            <button
-              @click="showDuplicates = !showDuplicates"
-              class="flex items-center justify-between w-full text-sm font-medium"
-              style="color: var(--color-text-primary);"
-            >
-              Duplicates
-              <ChevronDown :size="14" :class="{ 'rotate-180': showDuplicates }" class="transition-transform" />
-            </button>
-            <div v-if="showDuplicates" class="mt-2">
+            <!-- Duplicates -->
+            <div class="border-t py-3" style="border-color: var(--color-border);">
+              <p class="text-xs font-medium uppercase tracking-wide mb-2" style="color: var(--color-text-secondary);">Duplicates</p>
               <p class="text-xs" style="color: var(--color-text-secondary);">No duplicates detected.</p>
             </div>
-          </div>
 
-          <!-- Advanced -->
-          <div class="border-t py-3" style="border-color: var(--color-border);">
-            <button
-              @click="showAdvanced = !showAdvanced"
-              class="flex items-center justify-between w-full text-sm font-medium"
-              style="color: var(--color-text-primary);"
-            >
-              Advanced
-              <ChevronDown :size="14" :class="{ 'rotate-180': showAdvanced }" class="transition-transform" />
-            </button>
-            <div v-if="showAdvanced" class="mt-2 text-xs space-y-1" style="color: var(--color-text-secondary);">
-              <p>ID: {{ viewer.document.value?.id }}</p>
-              <p v-if="viewer.document.value?.parser_engine">Parser: {{ viewer.document.value.parser_engine }}</p>
-              <p v-if="viewer.document.value?.parser_config_hash">Config Hash: {{ viewer.document.value.parser_config_hash }}</p>
+            <!-- Advanced -->
+            <div class="border-t py-3" style="border-color: var(--color-border);">
+              <p class="text-xs font-medium uppercase tracking-wide mb-2" style="color: var(--color-text-secondary);">Advanced</p>
+              <div class="text-xs space-y-1" style="color: var(--color-text-secondary);">
+                <p>ID: {{ viewer.document.value?.id }}</p>
+                <p v-if="viewer.document.value?.parser_engine">Parser: {{ viewer.document.value.parser_engine }}</p>
+                <p v-if="viewer.document.value?.parser_config_hash">Config Hash: {{ viewer.document.value.parser_config_hash }}</p>
+              </div>
             </div>
           </div>
         </div>
+      </Transition>
+    </div>
+
+    <!-- Bottom toolbar -->
+    <div
+      class="flex items-center justify-between px-4 py-2 border-t shrink-0"
+      style="border-color: var(--color-border); background-color: var(--color-bg-secondary);"
+    >
+      <!-- Page navigation -->
+      <div class="flex items-center gap-2">
+        <button
+          @click="viewer.prevPage()"
+          :disabled="viewer.currentPage.value === 1"
+          class="p-1 rounded border disabled:opacity-40 hover:opacity-70"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          title="Previous page"
+        >
+          <ChevronLeft :size="14" />
+        </button>
+        <span class="text-xs tabular-nums" style="color: var(--color-text-secondary);">
+          Page {{ viewer.currentPage.value }} / {{ viewer.totalPages.value }}
+        </span>
+        <button
+          @click="viewer.nextPage()"
+          :disabled="viewer.currentPage.value === viewer.totalPages.value"
+          class="p-1 rounded border disabled:opacity-40 hover:opacity-70"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          title="Next page"
+        >
+          <ChevronRight :size="14" />
+        </button>
+      </div>
+
+      <!-- Search result navigation -->
+      <div v-if="hasSearchResults" class="flex items-center gap-2">
+        <span class="text-xs" style="color: var(--color-text-secondary);">{{ searchResultLabel }}</span>
+        <button
+          @click="appStore.prevSearchResult()"
+          class="p-1 rounded border hover:opacity-70"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          title="Previous result"
+        >
+          <ChevronLeft :size="14" />
+        </button>
+        <button
+          @click="appStore.nextSearchResult()"
+          class="p-1 rounded border hover:opacity-70"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          title="Next result"
+        >
+          <ChevronRight :size="14" />
+        </button>
       </div>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.2s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  transform: translateX(100%);
+}
+</style>

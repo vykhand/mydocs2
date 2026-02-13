@@ -17,8 +17,8 @@ const appStore = useAppStore()
 const docsStore = useDocumentsStore()
 
 const showAdvancedFilters = ref(false)
-const showStatusFilter = ref(true)
-const showFileTypeFilter = ref(true)
+const showStatusFilter = ref(false)
+const showFileTypeFilter = ref(false)
 
 const tabs = [
   { key: 'documents' as const, label: 'Documents', icon: FileText },

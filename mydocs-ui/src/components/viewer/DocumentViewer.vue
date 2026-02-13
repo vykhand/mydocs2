@@ -9,6 +9,7 @@ const props = defineProps<{
   currentPage: number
   zoom: number
   fileUrl: string
+  highlightQuery?: string
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +27,7 @@ const isImage = computed(() => ['jpeg', 'png', 'bmp', 'tiff'].includes(props.doc
       :file-url="fileUrl"
       :page="currentPage"
       :zoom="zoom"
+      :highlight-query="highlightQuery"
     />
     <ImageViewer
       v-else-if="isImage"

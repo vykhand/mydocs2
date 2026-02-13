@@ -95,7 +95,7 @@ The UI follows a **unified gallery architecture**: a single `GalleryView` serves
 - **Top Bar** -- fixed; contains sidebar toggle and app logo on the left, a centered search bar with `Cmd+K` shortcut hint, and action buttons on the right: Upload, Settings, Simple/Advanced mode toggle, and theme cycle (Light → Dark → System).
 - **Sidebar** -- contains two tab buttons (Documents / Cases) at the top. When the Documents tab is active, displays collapsible filter sections (status, file type, document type, sort, advanced filters with tags and date range). When collapsed, shows only icon buttons. On tablet, opens as a drawer overlay with backdrop. Hidden on mobile.
 - **Main Content Area** -- scrollable; renders the active route (`GalleryView` or `CasesGalleryView`).
-- **Right Viewer Panel** -- resizable side panel (250–800px, default 420px) for the document viewer. Appears when a document is opened. On desktop/wide: inline panel with drag-to-resize handle. On tablet/mobile: full-screen overlay. Contains document preview, page navigation, and collapsible metadata/tags/advanced sections.
+- **Right Viewer Panel** -- resizable side panel (300px – 75% viewport, default 420px) for the document viewer. Appears when a document is opened. On desktop/wide: inline panel with drag-to-resize handle. On tablet/mobile: full-screen overlay. The PDF viewer fills the full vertical space between the header and a bottom toolbar. Metadata, tags, duplicates, and advanced sections are in a slide-over info panel toggled by an info button in the header. Filter sections (Status, File Type) in the sidebar start **collapsed** by default to reduce visual clutter.
 - **Mobile Tab Bar** -- bottom navigation with Documents, Cases, and More tabs. More opens a bottom sheet with Upload and Settings links.
 
 ### 2.2 Responsive Breakpoints
@@ -181,8 +181,8 @@ Search is initiated from the **Top Bar search bar**, which debounces input by 30
 | Section              | Behavior |
 |----------------------|----------|
 | Active filter chips  | Colored pills for each active filter. Click to remove. |
-| Status               | Collapsible. Checkbox list: New, Parsing, Parsed, Failed. Single-select (click again to deselect). |
-| File Type            | Collapsible. Checkbox list: PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT. Single-select. |
+| Status               | Collapsible (collapsed by default). Checkbox list: New, Parsing, Parsed, Failed. Single-select (click again to deselect). |
+| File Type            | Collapsible (collapsed by default). Checkbox list: PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT. Single-select. |
 | Document Type        | Dropdown: All, Generic. |
 | Sort By              | Dropdown: Created Date, Modified Date, Name, Status. Plus ascending/descending dropdown. |
 | Advanced Filters     | Collapsed by default. Contains: Tags (chip input), Date Range (date picker). |
@@ -212,16 +212,27 @@ The document viewer is embedded in a **resizable right-side panel** (`RightViewe
 
 #### Panel Layout
 
+```
++------------------------------------------+
+| Header: [doc name]    [Info] [Max] [Close]|
++------------------------------------------+
+|                                          |
+|          PDF Viewer (full height)         |
+|          (canvas + text layer)            |
+|                                          |
++------------------------------------------+
+| Bottom toolbar:                          |
+| [Prev] Page X/Y [Next]  | Result 2/8 [<>]|
++------------------------------------------+
+```
+
 | Section              | Description |
 |----------------------|-------------|
-| Resize handle        | 6px-wide draggable area on the left edge. Changes cursor to `col-resize`. Panel width clamped to 250–800px. |
-| Header               | Document file name (truncated) with Maximize and Close buttons. |
-| Document preview     | `DocumentViewer` component rendering the PDF or image at a fixed height (300px). |
-| Page navigation      | Previous / Next buttons with "Page N / Total" display below the preview. |
-| Metadata section     | Collapsible. Shows file type, status, size, author, created date. |
-| Tags section         | Collapsible (open by default). Displays tag chips, or "No tags" placeholder. |
-| Duplicates section   | Collapsible. Placeholder for duplicate detection (future feature). |
-| Advanced section     | Collapsible. Shows document ID, parser engine, config hash. |
+| Resize handle        | 6px-wide draggable area on the left edge. Changes cursor to `col-resize`. Panel width clamped to 300px – 75% viewport. |
+| Header               | Document file name (truncated) with Info toggle, Maximize, and Close buttons. |
+| Document viewer      | `DocumentViewer` component rendering the PDF or image. Fills the full vertical space between header and bottom toolbar (`flex-1 min-h-0`). |
+| Info panel           | Slide-over panel on the right side of the viewer, toggled by the Info button in the header. Contains metadata, tags, duplicates, and advanced sections. Absolutely positioned overlay, scrollable. |
+| Bottom toolbar       | Always visible (`shrink-0`). Page navigation (Prev/Next + "Page N / Total") on the left. Search result navigation ("Result X of Y" + Prev/Next) on the right when opened from search. |
 
 On tablet and mobile, the viewer opens as a **full-screen overlay** (fixed position, z-50) instead of an inline panel.
 
@@ -234,7 +245,8 @@ On tablet and mobile, the viewer opens as a **full-screen overlay** (fixed posit
 | Page navigation     | Previous / Next buttons, page number input, total page count. Keyboard: arrow keys. |
 | Zoom controls       | Zoom in, zoom out, fit-to-width, fit-to-page. Pinch-to-zoom on touch devices. |
 | Thumbnail sidebar   | Vertical strip of page thumbnails on the left (hideable on mobile). Active page is highlighted. Click to jump. |
-| Highlight overlay   | When opened from a search result, the viewer scrolls to the matched page and draws semi-transparent highlight rectangles over the matching content regions. Highlights are derived from `DocumentElement.element_data` bounding regions that overlap with the search result content. |
+| Highlight overlay   | When opened from a search result, the viewer scrolls to the matched page and highlights matching text. **MVP implementation** uses the pdf.js text layer: after rendering the text layer spans, the viewer walks them to find case-insensitive query matches and wraps them with `<mark>` elements styled with `--color-highlight`. Future versions may use element bounding boxes from `DocumentElement.element_data`. |
+| Search result nav   | When opened from search, the bottom toolbar shows "Result X of Y" with Prev/Next buttons to cycle through search results across pages and documents. |
 | Element annotations | On hover/click of a highlighted region, a tooltip shows the element type, short_id, and extracted text. |
 
 #### Image Viewer
@@ -599,7 +611,7 @@ export async function checkHealth(): Promise<{ status: string; latencyMs: number
 - Button height: 36px (default), 32px (compact), 40px (large).
 - Sidebar width: 240px expanded, 64px collapsed (icon rail).
 - Top bar height: defined by `--height-topbar` CSS variable.
-- Right viewer panel: 420px default, 250–800px resize range.
+- Right viewer panel: 420px default, 300px – 75% viewport resize range.
 
 ### 7.4 Shadows & Borders
 

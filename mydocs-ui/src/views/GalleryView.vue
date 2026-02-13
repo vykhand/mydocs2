@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, onMounted } from 'vue'
+import { computed, watch, onMounted, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useDocumentsStore } from '@/stores/documents'
@@ -80,6 +80,17 @@ watch(() => route.query, () => {
     docsStore.fetchDocuments()
   }
 }, { deep: true })
+
+// Set search context on store when opening viewer from search results
+watch(() => appStore.viewerDocumentId, (newId) => {
+  if (newId && searchResults.value?.results?.length) {
+    const query = (route.query.q as string) || ''
+    const idx = searchResults.value.results.findIndex(
+      r => r.document_id === newId && r.page_number === appStore.viewerPage
+    )
+    appStore.setViewerSearchContext(searchResults.value.results, query, Math.max(0, idx))
+  }
+})
 
 onMounted(() => {
   syncUrlToStore()
