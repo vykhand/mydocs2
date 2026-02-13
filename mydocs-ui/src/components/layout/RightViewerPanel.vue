@@ -30,7 +30,7 @@ watch(() => route.query.page, (p) => {
   }
 })
 
-// Resize handle logic
+// Horizontal resize handle logic
 const isResizing = ref(false)
 
 function onResizeStart(e: MouseEvent) {
@@ -43,7 +43,8 @@ function onResizeStart(e: MouseEvent) {
 function onResizeMove(e: MouseEvent) {
   if (!isResizing.value) return
   const newWidth = window.innerWidth - e.clientX
-  panelWidth.value = Math.min(800, Math.max(250, newWidth))
+  const maxWidth = Math.floor(window.innerWidth * 0.75)
+  panelWidth.value = Math.min(maxWidth, Math.max(300, newWidth))
 }
 
 function onResizeEnd() {
@@ -52,9 +53,36 @@ function onResizeEnd() {
   document.removeEventListener('mouseup', onResizeEnd)
 }
 
+// Vertical resize handle logic for preview area
+const previewHeight = ref(400)
+const isResizingVertical = ref(false)
+const previewRef = ref<HTMLElement>()
+
+function onVerticalResizeStart(e: MouseEvent) {
+  e.preventDefault()
+  isResizingVertical.value = true
+  document.addEventListener('mousemove', onVerticalResizeMove)
+  document.addEventListener('mouseup', onVerticalResizeEnd)
+}
+
+function onVerticalResizeMove(e: MouseEvent) {
+  if (!isResizingVertical.value || !previewRef.value) return
+  const rect = previewRef.value.getBoundingClientRect()
+  const newHeight = e.clientY - rect.top
+  previewHeight.value = Math.min(window.innerHeight * 0.8, Math.max(150, newHeight))
+}
+
+function onVerticalResizeEnd() {
+  isResizingVertical.value = false
+  document.removeEventListener('mousemove', onVerticalResizeMove)
+  document.removeEventListener('mouseup', onVerticalResizeEnd)
+}
+
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
+  document.removeEventListener('mousemove', onVerticalResizeMove)
+  document.removeEventListener('mouseup', onVerticalResizeEnd)
 })
 </script>
 
@@ -104,14 +132,20 @@ onBeforeUnmount(() => {
       </div>
       <div v-else>
         <!-- Document preview -->
-        <div v-if="viewer.document.value" class="border-b" style="border-color: var(--color-border);">
+        <div v-if="viewer.document.value" ref="previewRef" class="relative border-b" style="border-color: var(--color-border);">
           <DocumentViewer
             :document="viewer.document.value"
             :current-page="viewer.currentPage.value"
             :zoom="viewer.zoom.value"
             :file-url="viewer.fileUrl.value"
             @go-to-page="viewer.goToPage"
-            class="h-[300px]"
+            :style="{ height: previewHeight + 'px' }"
+          />
+          <!-- Vertical resize handle -->
+          <div
+            class="absolute bottom-0 left-0 right-0 h-1.5 cursor-row-resize z-10 hover:bg-[var(--color-accent)]/20 transition-colors"
+            :style="{ backgroundColor: isResizingVertical ? 'var(--color-accent)' : 'transparent' }"
+            @mousedown="onVerticalResizeStart"
           />
         </div>
 

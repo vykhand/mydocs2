@@ -1,6 +1,16 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { VueDatePicker } from '@vuepic/vue-datepicker'
 import '@vuepic/vue-datepicker/dist/main.css'
+import { useAppStore } from '@/stores/app'
+
+const appStore = useAppStore()
+
+const isDark = computed(() => {
+  if (appStore.theme === 'dark') return true
+  if (appStore.theme === 'light') return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+})
 
 const props = defineProps<{
   startDate?: string
@@ -30,7 +40,7 @@ function onEndChange(val: Date | null) {
       auto-apply
       placeholder="Start"
       input-class-name="dp-custom-input"
-      :dark="document.documentElement.classList.contains('dark')"
+      :dark="isDark"
       class="flex-1"
     />
     <span class="text-xs shrink-0" style="color: var(--color-text-secondary);">to</span>
@@ -41,7 +51,7 @@ function onEndChange(val: Date | null) {
       auto-apply
       placeholder="End"
       input-class-name="dp-custom-input"
-      :dark="document.documentElement.classList.contains('dark')"
+      :dark="isDark"
       class="flex-1"
     />
   </div>

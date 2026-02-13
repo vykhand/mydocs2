@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted } from 'vue'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 const props = defineProps<{
   fileUrl: string
@@ -10,25 +14,31 @@ const props = defineProps<{
 const canvasRef = ref<HTMLCanvasElement>()
 const pdfDoc = ref<any>(null)
 const rendering = ref(false)
+const pendingRender = ref(false)
 
 async function loadPdf() {
-  const pdfjsLib = await import('pdfjs-dist')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString()
-
-  const loadingTask = pdfjsLib.getDocument(props.fileUrl)
-  pdfDoc.value = await loadingTask.promise
-  renderPage()
+  if (!props.fileUrl) return
+  try {
+    const loadingTask = pdfjsLib.getDocument(props.fileUrl)
+    pdfDoc.value = await loadingTask.promise
+    await renderPage()
+  } catch (err) {
+    console.error('Failed to load PDF:', err)
+  }
 }
 
 async function renderPage() {
-  if (!pdfDoc.value || !canvasRef.value || rendering.value) return
-  rendering.value = true
+  if (!pdfDoc.value || !canvasRef.value) return
 
+  if (rendering.value) {
+    pendingRender.value = true
+    return
+  }
+
+  rendering.value = true
   try {
-    const page = await pdfDoc.value.getPage(props.page)
+    const pageNum = Math.min(Math.max(1, props.page), pdfDoc.value.numPages)
+    const page = await pdfDoc.value.getPage(pageNum)
     const viewport = page.getViewport({ scale: props.zoom * 1.5 })
     const canvas = canvasRef.value
     const ctx = canvas.getContext('2d')!
@@ -36,13 +46,27 @@ async function renderPage() {
     canvas.width = viewport.width
 
     await page.render({ canvasContext: ctx, viewport }).promise
+  } catch (err) {
+    console.error('Failed to render page:', err)
   } finally {
     rendering.value = false
+    if (pendingRender.value) {
+      pendingRender.value = false
+      await renderPage()
+    }
   }
 }
 
 onMounted(loadPdf)
-watch(() => [props.page, props.zoom], renderPage)
+
+watch(() => props.fileUrl, () => {
+  pdfDoc.value = null
+  loadPdf()
+})
+
+watch(() => [props.page, props.zoom], () => {
+  renderPage()
+})
 </script>
 
 <template>
