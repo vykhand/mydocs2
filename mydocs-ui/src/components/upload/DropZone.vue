@@ -21,6 +21,11 @@ function onDrop(e: DragEvent) {
   }
 }
 
+function onContainerClick(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('button')) return
+  fileInput.value?.click()
+}
+
 function onFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   if (input.files) {
@@ -31,34 +36,36 @@ function onFileSelect(e: Event) {
 </script>
 
 <template>
-  <div
-    @dragover.prevent="dragOver = true"
-    @dragleave="dragOver = false"
-    @drop.prevent="onDrop"
-    @click="fileInput?.click()"
-    class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all"
-    :style="{
-      borderColor: dragOver ? 'var(--color-accent)' : 'var(--color-border)',
-      backgroundColor: dragOver ? 'var(--color-bg-tertiary)' : 'var(--color-bg-secondary)',
-      opacity: disabled ? '0.5' : '1',
-      pointerEvents: disabled ? 'none' : 'auto',
-    }"
-  >
-    <Upload :size="40" class="mx-auto mb-3" style="color: var(--color-text-secondary);" />
-    <p class="text-sm font-medium mb-1" style="color: var(--color-text-primary);">
-      Drop files here or click to browse
-    </p>
-    <p class="text-xs" style="color: var(--color-text-secondary);">
-      PDF, DOCX, XLSX, PPTX, TXT, and image files
-    </p>
-    <div class="mt-3">
-      <button
-        @click.stop.prevent="folderInput?.click()"
-        class="text-xs font-medium px-3 py-1.5 rounded-md border transition-colors"
-        style="border-color: var(--color-border); color: var(--color-text-secondary);"
-      >
-        Select Folder
-      </button>
+  <div>
+    <div
+      @dragover.prevent="dragOver = true"
+      @dragleave="dragOver = false"
+      @drop.prevent="onDrop"
+      @click="onContainerClick"
+      class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all"
+      :style="{
+        borderColor: dragOver ? 'var(--color-accent)' : 'var(--color-border)',
+        backgroundColor: dragOver ? 'var(--color-bg-tertiary)' : 'var(--color-bg-secondary)',
+        opacity: disabled ? '0.5' : '1',
+        pointerEvents: disabled ? 'none' : 'auto',
+      }"
+    >
+      <Upload :size="40" class="mx-auto mb-3" style="color: var(--color-text-secondary);" />
+      <p class="text-sm font-medium mb-1" style="color: var(--color-text-primary);">
+        Drop files here or click to browse
+      </p>
+      <p class="text-xs" style="color: var(--color-text-secondary);">
+        PDF, DOCX, XLSX, PPTX, TXT, and image files
+      </p>
+      <div class="mt-3">
+        <button
+          @click.stop.prevent="folderInput?.click()"
+          class="text-xs font-medium px-3 py-1.5 rounded-md border transition-colors"
+          style="border-color: var(--color-border); color: var(--color-text-secondary);"
+        >
+          Select Folder
+        </button>
+      </div>
     </div>
     <input ref="fileInput" type="file" multiple class="hidden" @change="onFileSelect" />
     <input ref="folderInput" type="file" multiple webkitdirectory class="hidden" @change="onFileSelect" />

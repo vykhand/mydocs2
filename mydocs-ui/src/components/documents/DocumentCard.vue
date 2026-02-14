@@ -2,6 +2,7 @@
 import type { Document } from '@/types'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
+import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
 import { FileText } from 'lucide-vue-next'
 
 defineProps<{
@@ -11,7 +12,7 @@ defineProps<{
 
 <template>
   <div
-    class="rounded-lg border p-4 cursor-pointer hover:shadow-md transition-shadow"
+    class="relative group rounded-lg border p-4 cursor-pointer hover:shadow-md transition-shadow"
     style="border-color: var(--color-border); background-color: var(--color-bg-secondary);"
     @click="$router.push(`/doc/${document.id}`)"
   >
@@ -41,6 +42,12 @@ defineProps<{
           </span>
         </div>
       </div>
+    </div>
+    <div
+      class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+      @click.stop
+    >
+      <AddToCaseMenu :document-ids="[document.id]" />
     </div>
   </div>
 </template>

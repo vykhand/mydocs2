@@ -48,12 +48,15 @@ async function loadPdf() {
     const data = await response.arrayBuffer()
     pdfDoc = await getDocument({ data }).promise
     emit('totalPagesResolved', pdfDoc.numPages)
-    await renderPage()
   } catch (err: any) {
     console.error('Failed to load PDF:', err)
     error.value = err?.message || 'Failed to load PDF'
   } finally {
     loading.value = false
+    if (pdfDoc) {
+      await nextTick()
+      await renderPage()
+    }
   }
 }
 

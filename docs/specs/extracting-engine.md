@@ -147,6 +147,12 @@ class FieldResult(BaseModel):
 ```
 
 When `reference_granularity = "none"`, only `content` is populated. When `"page"`, `content`, `justification`, `citation`, and `page_references` are populated. When `"full"`, all fields including `references` with polygon data.
+```todo 
+TODO: Change the data model for result. When granularity is None, we just use regular types for return values.
+Essentially, we should have multiple modes of extraction: Pydantic models where the bottom level fields are FieldResult, 
+and extraction will return and resolve references, or, just a pydantic class that is passed directly to the model structured outputs.
+For the latter scenario, we can have a second pass option to give model the original iformation and then generate references with extra LLM call.
+```
 
 ### 2.4 LLM Input/Output Models
 
@@ -187,7 +193,11 @@ class LLMLineItemsResult(BaseModel):
 Custom schemas are registered in the schema registry (Section 8.2) and referenced by name in prompt configs.
 
 ### 2.5 Extraction Request
+```todo
+TODO: Extraction requests should be dependent on case type and document type.
+Document ids or page ids or a file_ids are parameters for the retriever
 
+```
 ```python
 class ExtractionRequest(BaseModel):
     """Request to extract fields from documents."""
