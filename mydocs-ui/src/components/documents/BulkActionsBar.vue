@@ -6,6 +6,7 @@ import { batchParse, deleteDocument, addTags } from '@/api/documents'
 import TagInput from '@/components/common/TagInput.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { Play, Tag, Trash2, X } from 'lucide-vue-next'
+import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
 
 const docsStore = useDocumentsStore()
 const toast = useToast()
@@ -70,6 +71,7 @@ async function bulkDelete() {
       >
         <Tag :size="14" /> Add Tags
       </button>
+      <AddToCaseMenu :document-ids="Array.from(docsStore.selectedIds)" />
       <button
         @click="showDeleteConfirm = true"
         class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium"

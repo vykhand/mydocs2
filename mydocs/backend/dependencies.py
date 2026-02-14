@@ -54,3 +54,24 @@ class DocumentListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class CaseCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class CaseUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CaseDocumentsRequest(BaseModel):
+    document_ids: list[str]
+
+
+class CaseListResponse(BaseModel):
+    cases: list[dict]
+    total: int
+    page: int
+    page_size: int

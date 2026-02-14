@@ -18,7 +18,7 @@ from mydocs.backend.dependencies import (
     TagsRequest,
 )
 from mydocs.parsing.base_parser import DocumentLockedException
-from mydocs.parsing.models import Document, DocumentPage
+from mydocs.models import Document, DocumentPage
 from mydocs.parsing.pipeline import batch_parse, ingest_files, parse_document
 import mydocs.config as C
 
@@ -51,22 +51,34 @@ async def list_documents(
     page_size: int = Query(25, ge=1, le=100),
     status: Optional[str] = Query(None),
     file_type: Optional[str] = Query(None),
+    document_type: Optional[str] = Query(None),
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
     sort_by: str = Query("created_at"),
     sort_order: str = Query("desc"),
     search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None, description="ISO date string (inclusive)"),
+    date_to: Optional[str] = Query(None, description="ISO date string (inclusive)"),
 ):
     query = {}
     if status:
         query["status"] = status
     if file_type:
         query["file_type"] = file_type
+    if document_type:
+        query["document_type"] = document_type
     if tags:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         if tag_list:
             query["tags"] = {"$all": tag_list}
     if search:
         query["original_file_name"] = {"$regex": re.escape(search), "$options": "i"}
+    if date_from or date_to:
+        date_filter = {}
+        if date_from:
+            date_filter["$gte"] = date_from
+        if date_to:
+            date_filter["$lte"] = date_to + "T23:59:59"
+        query["created_at"] = date_filter
 
     sort_dir = -1 if sort_order == "desc" else 1
     skip = (page - 1) * page_size

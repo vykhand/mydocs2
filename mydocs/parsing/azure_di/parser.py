@@ -13,7 +13,7 @@ from mydocs.parsing.azure_di.html import get_element_html
 from mydocs.parsing.azure_di.markdown import get_element_markdown
 from mydocs.parsing.base_parser import DocumentParser
 from mydocs.parsing.config import ParserConfig
-from mydocs.parsing.models import (
+from mydocs.models import (
     Document,
     DocumentElement,
     DocumentElementTypeEnum,

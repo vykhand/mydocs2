@@ -15,10 +15,13 @@ export const useDocumentsStore = defineStore('documents', () => {
     page_size: 25,
     status: undefined,
     file_type: undefined,
+    document_type: undefined,
     tags: undefined,
     sort_by: 'created_at',
     sort_order: 'desc',
     search: undefined,
+    date_from: undefined,
+    date_to: undefined,
   })
 
   async function fetchDocuments() {

@@ -5,7 +5,7 @@ from azure.ai.documentintelligence.models import (
     ParagraphRole,
 )
 
-from mydocs.parsing.models import DocumentElementTypeEnum
+from mydocs.models import DocumentElementTypeEnum
 
 
 def table_to_markdown(table: DocumentTable) -> str:

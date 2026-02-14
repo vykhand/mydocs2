@@ -1,7 +1,7 @@
 """mydocs ingest command."""
 
 from mydocs.cli.formatters import format_ingest_result
-from mydocs.parsing.models import StorageModeEnum
+from mydocs.models import StorageModeEnum
 from mydocs.parsing.pipeline import ingest_files
 
 

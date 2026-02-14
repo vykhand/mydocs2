@@ -226,6 +226,51 @@ def format_doc_pages(pages, mode: str) -> None:
         print_table(headers, rows)
 
 
+def format_cases_list(cases, mode: str) -> None:
+    """Format and print a list of cases."""
+    if mode == "json":
+        print(json.dumps(
+            [c.model_dump(by_alias=False, exclude_none=True) for c in cases],
+            indent=2,
+            default=str,
+        ))
+    elif mode == "quiet":
+        print(len(cases))
+    else:
+        if not cases:
+            print("No cases found.")
+            return
+        headers = ["ID", "Name", "Documents", "Created"]
+        rows = [
+            [
+                c.id,
+                c.name,
+                str(len(c.document_ids) if c.document_ids else 0),
+                str(c.created_at) if c.created_at else "",
+            ]
+            for c in cases
+        ]
+        print_table(headers, rows)
+
+
+def format_case_show(case, mode: str) -> None:
+    """Format and print a single case's details."""
+    if mode == "json":
+        print(case.model_dump_json(indent=2))
+    else:
+        headers = ["Field", "Value"]
+        rows = [
+            ["ID", case.id],
+            ["Name", case.name],
+            ["Description", case.description or ""],
+            ["Documents", str(len(case.document_ids) if case.document_ids else 0)],
+            ["Document IDs", ",".join(case.document_ids) if case.document_ids else ""],
+            ["Created", str(case.created_at) if case.created_at else ""],
+            ["Modified", str(case.modified_at) if case.modified_at else ""],
+        ]
+        print_table(headers, rows)
+
+
 def format_config(serialized_config, mode: str) -> None:
     """Format and print configuration."""
     if mode == "json":

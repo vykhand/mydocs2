@@ -1,8 +1,8 @@
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, watch, isRef, type Ref } from 'vue'
 import { getDocument, getPages, getDocumentFileUrl } from '@/api/documents'
 import type { Document, DocumentPage } from '@/types'
 
-export function useDocumentViewer(documentId: string, initialPage = 1) {
+export function useDocumentViewer(documentId: string | Ref<string | null>, initialPage = 1) {
   const document = ref<Document | null>(null)
   const pages = ref<DocumentPage[]>([])
   const currentPage = ref(initialPage)
@@ -11,13 +11,17 @@ export function useDocumentViewer(documentId: string, initialPage = 1) {
   const loading = ref(true)
   const pdfDoc = ref<any>(null)
 
-  const fileUrl = getDocumentFileUrl(documentId)
+  const resolveId = () => isRef(documentId) ? documentId.value : documentId
+  const fileUrl = ref(resolveId() ? getDocumentFileUrl(resolveId()!) : '')
 
   async function loadDocument() {
+    const id = resolveId()
+    if (!id) return
     loading.value = true
+    fileUrl.value = getDocumentFileUrl(id)
     try {
-      document.value = await getDocument(documentId)
-      pages.value = await getPages(documentId)
+      document.value = await getDocument(id)
+      pages.value = await getPages(id)
       totalPages.value = document.value.file_metadata?.page_count || pages.value.length || 1
     } finally {
       loading.value = false
@@ -48,6 +52,16 @@ export function useDocumentViewer(documentId: string, initialPage = 1) {
 
   function fitToPage() {
     zoom.value = 0.85
+  }
+
+  // If documentId is a ref, watch for changes
+  if (isRef(documentId)) {
+    watch(documentId, (newId) => {
+      if (newId) {
+        currentPage.value = 1
+        loadDocument()
+      }
+    })
   }
 
   onMounted(loadDocument)

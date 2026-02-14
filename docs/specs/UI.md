@@ -3,7 +3,7 @@
 | Field   | Value                |
 |---------|----------------------|
 | Package | `mydocs-ui`          |
-| Version | 1.0                  |
+| Version | 2.0                  |
 | Status  | Draft                |
 | Stack   | Vue 3, Vite, Tailwind CSS, Pinia |
 
@@ -11,58 +11,101 @@
 
 A single-page application providing a modern, professional interface for document management, search, and case organization. The UI communicates exclusively with the FastAPI backend via `/api/v1/` endpoints.
 
+The UI follows a **unified gallery architecture**: a single `GalleryView` serves as the primary entry point for documents and search, with upload and settings presented as modal/drawer overlays. A resizable right-side panel hosts the document viewer inline, avoiding full-page navigation. Cases have their own gallery view.
+
 ### 1.1 Design Principles
 
 - **Mobile-first responsive** -- usable on phones, tablets, and desktops.
 - **Simple by default, powerful when needed** -- every feature has a sensible default; advanced controls are hidden behind an "Advanced Settings" toggle.
 - **Consistent visual language** -- clean typography, generous whitespace, subtle shadows, and a neutral color palette with a single accent color.
 - **Immediate feedback** -- every user action produces visible feedback (toasts, progress bars, skeleton loaders).
+- **Gallery-first** -- documents are browsed in a unified gallery with inline viewer, not navigated across separate pages.
 
 ### 1.2 Technology Stack
 
-| Layer         | Choice               | Rationale                              |
-|---------------|----------------------|----------------------------------------|
-| Framework     | Vue 3 (Composition API, `<script setup>`) | Reactive, lightweight, strong ecosystem |
-| Build         | Vite                 | Fast HMR, native ESM                   |
-| Styling       | Tailwind CSS 4       | Utility-first, responsive breakpoints  |
-| State         | Pinia                | Official Vue store, devtools support    |
-| HTTP          | Axios                | Interceptors for error handling         |
-| Routing       | Vue Router 4         | Nested routes, lazy loading             |
-| Icons         | Lucide Vue           | Consistent, tree-shakeable icon set     |
-| PDF Viewer    | PDF.js (`pdfjs-dist`)| Renders PDF pages on canvas, supports text layer and highlight annotations |
-| Notifications | Vue Toastification   | Toast messages for user feedback        |
+| Layer          | Choice               | Rationale                              |
+|----------------|----------------------|----------------------------------------|
+| Framework      | Vue 3 (Composition API, `<script setup>`) | Reactive, lightweight, strong ecosystem |
+| Build          | Vite                 | Fast HMR, native ESM                   |
+| Styling        | Tailwind CSS 4       | Utility-first, responsive breakpoints  |
+| State          | Pinia + `pinia-plugin-persistedstate` | Official Vue store, devtools support, `localStorage` persistence |
+| HTTP           | Axios                | Interceptors for error handling         |
+| Routing        | Vue Router 4         | Lazy loading, route metadata for modals |
+| Icons          | Lucide Vue Next      | Consistent, tree-shakeable icon set     |
+| PDF Viewer     | PDF.js (`pdfjs-dist`)| Renders PDF pages on canvas, supports text layer and highlight annotations |
+| Date Picker    | `@vuepic/vue-datepicker` | Rich date-range selection component  |
+| Notifications  | Vue Toastification   | Toast messages for user feedback        |
 
 ## 2. Layout & Navigation
 
 ### 2.1 Shell Layout
 
+#### Wide / Desktop (>= 1024px)
+
 ```
-+---------------------------------------------------------------+
-| Top Bar  [Logo / App Name]            [Simple|Advanced] [User]|
-+----------+----------------------------------------------------+
-|          |                                                    |
-| Sidebar  |               Main Content Area                   |
-| (nav)    |                                                    |
-|          |                                                    |
-+----------+----------------------------------------------------+
++-----------------------------------------------------------------------+
+| Top Bar  [≡] [mydocs]   [____Search (Cmd+K)____]  [Upload] [⚙] [◑] [☀]|
++------------+------------------------------------+---------------------+
+|            |                                    |                     |
+| Sidebar    |        Gallery / Content           |   Right Viewer      |
+| [Docs|Cases]        (grid or list)              |   Panel (resizable) |
+| [Filters]  |                                    |                     |
+| - Status   |                                    |   [Document name]   |
+| - File Type|                                    |   [PDF/Image view]  |
+| - Doc Type |                                    |   [Page nav]        |
+| - Sort     |                                    |   [Metadata]        |
+| - Advanced |                                    |   [Tags]            |
+|   - Tags   |                                    |   [Advanced]        |
+|   - Date   |                                    |                     |
++------------+------------------------------------+---------------------+
 ```
 
-- **Top Bar** -- fixed; contains app logo/name on the left, mode toggle (Simple/Advanced) center-right, and a user avatar/menu on the far right.
-- **Sidebar** -- collapsible; icons + labels on desktop, icons-only when collapsed, bottom tab-bar on mobile (< 768px). Navigation items:
-  1. Upload
-  2. Documents
-  3. Search
-  4. Cases
-  5. Settings
-- **Main Content Area** -- scrollable; renders the active route.
+#### Tablet (768–1023px)
+
+```
++-----------------------------------------------------------------------+
+| Top Bar  [≡] [mydocs]   [____Search____]   [Upload] [⚙] [◑] [☀]      |
++-----------------------------------------------------------------------+
+|                                                                       |
+|              Gallery / Content (full width)                            |
+|                                                                       |
++-----------------------------------------------------------------------+
+  Sidebar: opens as drawer overlay on [≡] tap
+  Viewer: opens as full-screen overlay
+```
+
+#### Mobile (< 768px)
+
+```
++-----------------------------------------------------------------------+
+| Top Bar  [mydocs]                        [Upload] [⚙] [◑] [☀]        |
++-----------------------------------------------------------------------+
+|                                                                       |
+|              Gallery / Content (full width)                            |
+|                                                                       |
++-----------------------------------------------------------------------+
+| [Documents]         [Cases]         [More ...]                        |
++-----------------------------------------------------------------------+
+  Search bar: hidden (accessible via More menu or Cmd+K)
+  Sidebar: hidden; filters via MobileFilterSheet
+  Viewer: opens as full-screen overlay
+  More menu: bottom sheet with Upload, Settings links
+```
+
+- **Top Bar** -- fixed; contains sidebar toggle and app logo on the left, a centered search bar with `Cmd+K` shortcut hint, and action buttons on the right: Upload, Settings, Simple/Advanced mode toggle, and theme cycle (Light → Dark → System).
+- **Sidebar** -- contains two tab buttons (Documents / Cases) at the top. When the Documents tab is active, displays collapsible filter sections (status, file type, document type, sort, advanced filters with tags and date range). When collapsed, shows only icon buttons. On tablet, opens as a drawer overlay with backdrop. Hidden on mobile.
+- **Main Content Area** -- scrollable; renders the active route (`GalleryView` or `CasesGalleryView`).
+- **Right Viewer Panel** -- resizable side panel (300px – 75% viewport, default 420px) for the document viewer. Appears when a document is opened. On desktop/wide: inline panel with drag-to-resize handle. On tablet/mobile: full-screen overlay. The PDF viewer fills the full vertical space between the header and a bottom toolbar. Metadata, tags, duplicates, and advanced sections are in a slide-over info panel toggled by an info button in the header. Filter sections (Status, File Type) in the sidebar start **collapsed** by default to reduce visual clutter.
+- **Mobile Tab Bar** -- bottom navigation with Documents, Cases, and More tabs. More opens a bottom sheet with Upload and Settings links.
 
 ### 2.2 Responsive Breakpoints
 
-| Breakpoint | Width       | Sidebar Behavior          |
-|------------|-------------|---------------------------|
-| `sm`       | < 768px     | Hidden; bottom tab-bar    |
-| `md`       | 768–1023px  | Collapsed (icons only)    |
-| `lg`       | >= 1024px   | Expanded (icons + labels) |
+| Breakpoint | Width        | Sidebar Behavior              | Viewer Behavior          |
+|------------|--------------|-------------------------------|--------------------------|
+| `sm`       | < 768px      | Hidden; bottom tab-bar        | Full-screen overlay      |
+| `md`       | 768–1023px   | Drawer overlay on toggle      | Full-screen overlay      |
+| `lg`       | 1024–1279px  | Icon rail (collapsible)       | Inline side panel        |
+| `xl`       | >= 1280px    | Expanded (icons + labels)     | Inline side panel        |
 
 ### 2.3 Simple / Advanced Mode
 
@@ -73,9 +116,9 @@ A global toggle stored in Pinia and persisted to `localStorage`.
 
 ## 3. Views & Features
 
-### 3.1 Upload View (`/upload`)
+### 3.1 Upload (`/upload` -- modal overlay)
 
-Allows ingesting files and folders into the system.
+Upload is presented as a **modal overlay** on top of the gallery view. Navigating to `/upload` renders `GalleryView` with the `UploadModal` component displayed over it.
 
 #### UI Elements
 
@@ -101,57 +144,50 @@ Allows ingesting files and folders into the system.
 - On success, displays a summary with document IDs and a link to browse.
 - Optionally triggers parse immediately via `POST /api/v1/documents/parse` (toggle: "Parse after upload").
 
-### 3.2 Documents View (`/documents`)
+### 3.2 Gallery View (`/` -- main entry point)
 
-Browse, filter, and manage all ingested documents.
+The unified gallery serves as both the document browser and the search results view. URL query parameters drive the mode:
 
-#### UI Elements
+- **No `?q=` param** -- displays the document grid/list with filters and pagination.
+- **With `?q=<term>`** -- displays search results (hybrid search on pages by default).
+
+#### Gallery Toolbar
 
 | Element              | Description |
 |----------------------|-------------|
-| Filter bar           | Inline filters: status dropdown (`all`, `new`, `parsing`, `parsed`, `failed`), file type dropdown, tag selector (multi-select), date range picker, text search on file name. |
-| Sort control         | Sort by: name, created date, modified date, status. Ascending/descending toggle. |
-| Document table/grid  | Default: table view (columns: name, type, status, tags, pages, created). Toggle to grid/card view showing thumbnail + metadata. |
-| Pagination           | Page size selector (25, 50, 100) and page navigation. |
-| Bulk actions bar     | Appears when one or more rows are selected. Actions: Parse, Add Tags, Remove Tags, Assign to Case, Delete. |
-| Document row actions | Inline icon buttons: View, Parse, Tag, Delete. |
+| Result count         | Displays total number of documents or search results. |
+| View mode toggle     | Grid / List icons to switch `galleryViewMode` in the app store. |
 
-#### Document Detail Panel (`/documents/:id`)
+#### Document Gallery Mode (no search query)
 
-Opens as a side panel (desktop) or full page (mobile).
+| Element              | Description |
+|----------------------|-------------|
+| Document grid/list   | `DocumentGrid` renders documents as cards (grid mode) or rows (list mode). Each item shows file name, type badge, status badge, tags, and created date. Clicking opens the Right Viewer Panel. |
+| Sidebar filters      | In the sidebar: collapsible status filter (checkboxes), file type filter (checkboxes), document type dropdown, sort-by and sort-order dropdowns. Advanced filters section (collapsed by default) contains tags input and date range picker. Active filters shown as removable chips above the filter sections. |
+| Pagination           | Page size selector (25, 50, 100) and page navigation at the bottom. |
+| Bulk actions bar     | Appears when one or more documents are selected. Actions: Parse, Add Tags, Remove Tags, Assign to Case, Delete. |
 
-| Section        | Content |
-|----------------|---------|
-| Header         | File name, type badge, status badge, created/modified dates. |
-| Metadata       | Size, MIME type, SHA-256, page count, author, title (from `file_metadata`). |
-| Tags           | Editable chip list. Add/remove tags via `POST /api/v1/documents/{id}/tags` and `DELETE /api/v1/documents/{id}/tags/{tag}`. |
-| Pages          | Paginated list/grid of page thumbnails. Click opens the Document Viewer (Section 3.4). |
-| Elements       | Collapsible list of `DocumentElement` entries grouped by page, showing type badge and short_id. |
-| Cases          | List of cases this document belongs to, with links. |
-| Actions        | Re-parse button, Delete button (with confirmation dialog). |
+#### Search Results Mode (with `?q=` query param)
 
-#### Advanced Mode Additions
+| Element              | Description |
+|----------------------|-------------|
+| Search results list  | `SearchResultsList` renders results as cards showing: file name, page number, relevance score, content snippet with highlighted terms, tags. |
+| Result actions       | Clicking a result opens the Right Viewer Panel at the matched page with highlights. |
 
-| Element           | Description |
-|-------------------|-------------|
-| Parse config      | Expandable section to override `azure_di_model`, `azure_di_kwargs`, and embedding configs before triggering parse. |
-| Raw JSON toggle   | Button to view the raw document/page JSON from the API. |
+Search is initiated from the **Top Bar search bar**, which debounces input by 300ms and updates the URL query parameter. The `GalleryView` watches `route.query` and switches between document listing and search results accordingly.
 
-### 3.3 Search View (`/search`)
+#### Sidebar Filter Sections (Documents tab)
 
-Multifaceted search across documents and pages.
+| Section              | Behavior |
+|----------------------|----------|
+| Active filter chips  | Colored pills for each active filter. Click to remove. |
+| Status               | Collapsible (collapsed by default). Checkbox list: New, Parsing, Parsed, Failed. Single-select (click again to deselect). |
+| File Type            | Collapsible (collapsed by default). Checkbox list: PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT. Single-select. |
+| Document Type        | Dropdown: All, Generic. |
+| Sort By              | Dropdown: Created Date, Modified Date, Name, Status. Plus ascending/descending dropdown. |
+| Advanced Filters     | Collapsed by default. Contains: Tags (chip input), Date Range (date picker). |
 
-#### Simple Mode
-
-| Element          | Description |
-|------------------|-------------|
-| Search bar       | Large, centered input with a search icon. Placeholder: "Search documents...". Supports Enter to submit. |
-| Search target    | Toggle pills: "Pages" (default) / "Documents". |
-| Quick filters    | Collapsible row: tags (multi-select), file type, date range. |
-| Results list     | Cards showing: file name, page number (if page search), relevance score bar, snippet with highlighted matching terms, tags. |
-| Result actions   | "View" opens the Document Viewer at the matched page with highlights. "Open Document" navigates to the document detail. |
-
-The simple mode uses `search_mode: "hybrid"` with all default config values.
+All filter changes sync to URL query params via `router.replace()`, enabling bookmarkable filtered views.
 
 #### Advanced Mode Additions
 
@@ -161,18 +197,44 @@ The simple mode uses `search_mode: "hybrid"` with all default config values.
 | Fulltext config panel    | `content_field` input, fuzzy toggle + `max_edits` (1-2) + `prefix_length` slider, `score_boost` number input. |
 | Vector config panel      | Index selector (populated from `GET /api/v1/search/indices`), embedding model input, `num_candidates` slider, `score_boost` number input. |
 | Hybrid config panel      | Combination method radio (RRF / Weighted Sum), `rrf_k` input, weight sliders for fulltext and vector (summing to 1.0). |
-| Filters panel            | Document IDs input (comma-separated), status dropdown, document type dropdown -- in addition to the simple-mode filters. |
+| Filters panel            | Document IDs input (comma-separated), status dropdown, document type dropdown -- in addition to the sidebar filters. |
 | Result controls          | `top_k` input (default 10), `min_score` slider (0.0 – 1.0), `include_content_fields` multi-select. |
 | Score breakdown          | Each result card shows individual fulltext and vector scores alongside the combined score. |
 
 #### API Integration
 
-- Calls `POST /api/v1/search` with the assembled `SearchRequest` body.
-- Debounces input by 300ms for live-search (optional; can also be submit-only).
+- **Document listing**: `GET /api/v1/documents` with filter/sort/pagination params from the documents store.
+- **Search**: `POST /api/v1/search` with `{ query, search_target: 'pages', search_mode: 'hybrid', filters, top_k: 20 }`.
 
-### 3.4 Document Viewer (`/documents/:id/view` or modal)
+### 3.3 Document Viewer (Right Panel)
 
-An in-app viewer for PDF and image documents with search-result highlighting.
+The document viewer is embedded in a **resizable right-side panel** (`RightViewerPanel`) within the `AppShell`. Opening a document (via gallery click or navigating to `/doc/:id`) sets `viewerOpen = true` in the app store and renders the panel alongside the gallery.
+
+#### Panel Layout
+
+```
++------------------------------------------+
+| Header: [doc name]    [Info] [Max] [Close]|
++------------------------------------------+
+|                                          |
+|          PDF Viewer (full height)         |
+|          (canvas + text layer)            |
+|                                          |
++------------------------------------------+
+| Bottom toolbar:                          |
+| [Prev] Page X/Y [Next]  | Result 2/8 [<>]|
++------------------------------------------+
+```
+
+| Section              | Description |
+|----------------------|-------------|
+| Resize handle        | 6px-wide draggable area on the left edge. Changes cursor to `col-resize`. Panel width clamped to 300px – 75% viewport. |
+| Header               | Document file name (truncated) with Info toggle, Maximize, and Close buttons. |
+| Document viewer      | `DocumentViewer` component rendering the PDF or image. Fills the full vertical space between header and bottom toolbar (`flex-1 min-h-0`). |
+| Info panel           | Slide-over panel on the right side of the viewer, toggled by the Info button in the header. Contains metadata, tags, duplicates, and advanced sections. Absolutely positioned overlay, scrollable. |
+| Bottom toolbar       | Always visible (`shrink-0`). Page navigation (Prev/Next + "Page N / Total") on the left. Search result navigation ("Result X of Y" + Prev/Next) on the right when opened from search. |
+
+On tablet and mobile, the viewer opens as a **full-screen overlay** (fixed position, z-50) instead of an inline panel.
 
 #### PDF Viewer
 
@@ -183,7 +245,8 @@ An in-app viewer for PDF and image documents with search-result highlighting.
 | Page navigation     | Previous / Next buttons, page number input, total page count. Keyboard: arrow keys. |
 | Zoom controls       | Zoom in, zoom out, fit-to-width, fit-to-page. Pinch-to-zoom on touch devices. |
 | Thumbnail sidebar   | Vertical strip of page thumbnails on the left (hideable on mobile). Active page is highlighted. Click to jump. |
-| Highlight overlay   | When opened from a search result, the viewer scrolls to the matched page and draws semi-transparent highlight rectangles over the matching content regions. Highlights are derived from `DocumentElement.element_data` bounding regions that overlap with the search result content. |
+| Highlight overlay   | When opened from a search result, the viewer scrolls to the matched page and highlights matching text. **MVP implementation** uses the pdf.js text layer: after rendering the text layer spans, the viewer walks them to find case-insensitive query matches and wraps them with `<mark>` elements styled with `--color-highlight`. Future versions may use element bounding boxes from `DocumentElement.element_data`. |
+| Search result nav   | When opened from search, the bottom toolbar shows "Result X of Y" with Prev/Next buttons to cycle through search results across pages and documents. |
 | Element annotations | On hover/click of a highlighted region, a tooltip shows the element type, short_id, and extracted text. |
 
 #### Image Viewer
@@ -199,15 +262,15 @@ An in-app viewer for PDF and image documents with search-result highlighting.
 |------------------|--------|
 | Download         | Downloads the original file. |
 | Fullscreen       | Enters browser fullscreen mode. |
-| Close            | Returns to previous view. |
+| Close            | Closes the viewer panel and navigates back to the gallery. |
 
-### 3.5 Tags Management
+### 3.4 Tags Management
 
 Tags are free-form strings attached to documents.
 
 #### Tag Input Component
 
-A reusable component used in Upload, Document Detail, Bulk Actions, and Search Filters.
+A reusable component used in Upload, Sidebar Filters, Viewer Panel, Bulk Actions, and Search Filters.
 
 | Behavior              | Description |
 |-----------------------|-------------|
@@ -219,76 +282,48 @@ A reusable component used in Upload, Document Detail, Bulk Actions, and Search F
 
 #### Tag Assignment Flows
 
-1. **Single document** -- Document Detail panel > Tags section > add/remove chips. Each change fires `POST /api/v1/documents/{id}/tags` or `DELETE /api/v1/documents/{id}/tags/{tag}`.
-2. **Bulk** -- Select documents in the Documents table > Bulk Actions bar > "Add Tags" or "Remove Tags" opens a modal with a tag input. Applies to all selected documents via sequential API calls (with a progress indicator).
-3. **At upload** -- Tags entered in the Upload view are passed to the ingest endpoint and applied to all ingested documents.
+1. **Single document** -- Viewer panel > Tags section > add/remove chips. Each change fires `POST /api/v1/documents/{id}/tags` or `DELETE /api/v1/documents/{id}/tags/{tag}`.
+2. **Bulk** -- Select documents in the gallery > Bulk Actions bar > "Add Tags" or "Remove Tags" opens a modal with a tag input. Applies to all selected documents via sequential API calls (with a progress indicator).
+3. **At upload** -- Tags entered in the Upload modal are passed to the ingest endpoint and applied to all ingested documents.
 
-### 3.6 Cases View (`/cases`)
+### 3.5 Cases View (`/cases`)
 
 Cases group related documents for review or investigation.
 
-#### Case List
+#### Case Gallery
 
 | Element             | Description |
 |---------------------|-------------|
-| Case table          | Columns: case name, description (truncated), document count, created date, status badge. |
-| Create Case button  | Opens a modal/form to create a new case. |
-| Search/filter       | Text search on case name, status filter. |
-| Case row actions    | View, Edit, Delete. |
+| Header              | "Cases" heading with a "New Case" button. |
+| Case card grid      | Responsive grid (1 column on mobile, 2 on tablet, 3 on desktop) of `CaseCard` components showing case name, description preview, document count, and created date. Clicking navigates to `/cases/:id`. |
+| Empty state         | Centered message: "No cases yet. Create your first case to start organizing documents." |
 
-#### Create / Edit Case Modal
+#### Create Case Dialog
+
+A modal dialog (`CreateCaseDialog`) with:
 
 | Field         | Type        | Description |
 |---------------|-------------|-------------|
 | Name          | Text input  | Required. Max 200 characters. |
 | Description   | Textarea    | Optional. Markdown supported. |
-| Status        | Dropdown    | `open` (default), `in_review`, `closed`. |
-| Tags          | Tag input   | Optional tags for the case itself. |
 
 #### Case Detail View (`/cases/:id`)
 
 | Section             | Description |
 |---------------------|-------------|
-| Header              | Case name, status badge, created/modified dates, description. |
+| Header              | Case name, created/modified dates, description. (`CaseHeader` component) |
 | Document list       | Table of documents assigned to this case: name, type, status, tags, date added. Sortable and filterable. |
-| Add documents       | Button opens a document picker modal -- a searchable, filterable list of all documents with checkboxes. Selected documents are assigned to the case. |
+| Add documents       | `AddToCaseMenu` component for assigning documents to the case. |
 | Remove document     | Per-row action to unassign a document from the case (does not delete the document). |
 | Bulk actions        | Select multiple documents > Remove from Case, Add Tags. |
-| Notes / Activity    | A simple timeline/log of actions taken on the case (document added, status changed, etc.). |
 
-#### Data Model Note
+#### Data Model
 
-Cases are not yet defined in the backend spec. The UI spec assumes the following endpoints will be added:
+The `Case` model is defined in `mydocs/models.py:Case`. See [backend.md](backend.md) Section 3.9 for the full Case API contract (8 endpoints).
 
-| Method   | Endpoint                              | Purpose |
-|----------|---------------------------------------|---------|
-| `GET`    | `/api/v1/cases`                       | List cases (with pagination, filters). |
-| `POST`   | `/api/v1/cases`                       | Create a new case. |
-| `GET`    | `/api/v1/cases/{case_id}`             | Get case details. |
-| `PUT`    | `/api/v1/cases/{case_id}`             | Update case metadata. |
-| `DELETE` | `/api/v1/cases/{case_id}`             | Delete a case (does not delete documents). |
-| `POST`   | `/api/v1/cases/{case_id}/documents`   | Assign documents to a case. |
-| `DELETE` | `/api/v1/cases/{case_id}/documents/{document_id}` | Remove a document from a case. |
+### 3.6 Settings (`/settings` -- drawer overlay)
 
-Assumed backend model:
-
-```python
-class Case(MongoBaseModel):
-    name: str
-    description: Optional[str] = None
-    status: str = "open"  # open, in_review, closed
-    tags: list[str] = []
-    document_ids: list[str] = []
-    created_at: datetime
-    modified_at: datetime
-
-    class Settings:
-        name = "cases"
-```
-
-### 3.7 Settings View (`/settings`)
-
-Global application settings.
+Settings are presented as a **slide-in drawer** (`SettingsDrawer`) overlaying the gallery view. Navigating to `/settings` renders `GalleryView` with the drawer displayed.
 
 | Section              | Description |
 |----------------------|-------------|
@@ -296,10 +331,20 @@ Global application settings.
 | Default search mode  | Dropdown: Hybrid / Fulltext / Vector. Applied when search is used in Simple mode. |
 | Default top_k        | Number input (default 10). |
 | Parser defaults      | Azure DI model selector, embedding model selector. Only shown in Advanced mode. |
-| Connection info      | Displays backend URL, connection status indicator (green/red dot with latency). |
-| About                | App version, backend version (from a `/api/v1/health` endpoint). |
+| Connection info      | Displays backend URL, connection status indicator (green/red dot with latency via `GET /health`). |
+| About                | App version, backend version. |
 
-All settings are stored in `localStorage` via Pinia persisted state.
+All settings are stored in `localStorage` via Pinia persisted state (in the `settings` store).
+
+### 3.7 Keyboard Shortcuts
+
+Global keyboard shortcuts registered via the `useKeyboardShortcuts` composable:
+
+| Shortcut             | Action |
+|----------------------|--------|
+| `Cmd+K` / `Ctrl+K`  | Focus the search bar in the Top Bar. |
+| `/`                  | Focus the search bar (when no input is focused). |
+| `Escape`             | Close the document viewer panel if open. |
 
 ## 4. Component Architecture
 
@@ -309,48 +354,60 @@ All settings are stored in `localStorage` via Pinia persisted state.
 mydocs-ui/
   index.html
   vite.config.ts
-  tailwind.config.ts
   tsconfig.json
   package.json
   src/
     main.ts                          # App bootstrap
-    App.vue                          # Root component (shell layout)
+    App.vue                          # Root component, registers keyboard shortcuts
     router/
-      index.ts                       # Route definitions
+      index.ts                       # Route definitions with meta-driven modals
     stores/
-      app.ts                         # Global state (mode, theme, sidebar)
-      documents.ts                   # Document list state, pagination
+      app.ts                         # Global state (mode, theme, sidebar, viewer, activeTab, galleryViewMode)
+      documents.ts                   # Document list state, filters, pagination
       search.ts                      # Search state, results
       cases.ts                       # Case list state
       tags.ts                        # Tag autocomplete cache
+      settings.ts                    # User preferences (search defaults, parser defaults)
     api/
       client.ts                      # Axios instance, interceptors
       documents.ts                   # Document API calls
       search.ts                      # Search API calls
       cases.ts                       # Case API calls
+      health.ts                      # Health check with latency measurement
     views/
-      UploadView.vue
-      DocumentsView.vue
-      DocumentDetailView.vue
-      SearchView.vue
-      CasesView.vue
-      CaseDetailView.vue
-      SettingsView.vue
+      GalleryView.vue                # Primary view: document gallery + search results
+      CasesGalleryView.vue           # Cases card grid with create dialog
+      CaseDetailView.vue             # Single case detail with document list
+      UploadView.vue                 # (legacy, redirects to /upload modal)
+      DocumentsView.vue              # (legacy, redirects to /)
+      DocumentDetailView.vue         # (legacy, redirects to /doc/:id)
+      SearchView.vue                 # (legacy, redirects to /?q=)
+      CasesView.vue                  # (legacy, redirects to /cases)
+      SettingsView.vue               # (legacy, redirects to /settings drawer)
+      DocumentViewerView.vue         # (legacy, redirects to /doc/:id)
     components/
       layout/
-        AppShell.vue                 # Top bar + sidebar + content slot
-        SidebarNav.vue
-        TopBar.vue
-        MobileTabBar.vue
+        AppShell.vue                 # Top bar + sidebar + content slot + right viewer panel
+        TopBar.vue                   # Logo, search bar, upload/settings/mode/theme buttons
+        SidebarNav.vue               # Tabs (Docs/Cases) + collapsible filter sections
+        MobileTabBar.vue             # Bottom nav: Documents, Cases, More
+        RightViewerPanel.vue         # Resizable document viewer side panel
+        MobileFilterSheet.vue        # Mobile filter bottom sheet
+      gallery/
+        GalleryToolbar.vue           # Result count + grid/list view toggle
+        DocumentGrid.vue             # Renders documents in grid or list layout
+        SearchResultsList.vue        # Renders search result cards
+        UploadModal.vue              # Upload modal overlay
+        SettingsDrawer.vue           # Settings slide-in drawer overlay
       common/
-        TagInput.vue                 # Reusable tag chip input
+        TagInput.vue                 # Reusable tag chip input with autocomplete
         StatusBadge.vue              # Colored status pills
         FileTypeBadge.vue
         ConfirmDialog.vue
         EmptyState.vue               # Illustration + message for empty lists
         LoadingSkeleton.vue
         PaginationBar.vue
-        DateRangePicker.vue
+        DateRangePicker.vue          # Uses @vuepic/vue-datepicker
         ModeToggle.vue               # Simple/Advanced toggle
       upload/
         DropZone.vue
@@ -376,20 +433,21 @@ mydocs-ui/
         ThumbnailSidebar.vue
         ViewerToolbar.vue
       cases/
-        CaseTable.vue
-        CaseForm.vue
-        DocumentPicker.vue           # Modal for assigning docs to case
-        CaseTimeline.vue
+        CaseCard.vue                 # Card for case grid display
+        CaseHeader.vue               # Case detail header
+        CreateCaseDialog.vue         # Create case modal form
+        AddToCaseMenu.vue            # Assign documents to a case
     composables/
       useSearch.ts                   # Search logic, debouncing
-      useDocumentViewer.ts           # PDF.js lifecycle, page navigation
+      useDocumentViewer.ts           # PDF.js lifecycle, page navigation, file URL
       useHighlights.ts              # Compute highlight rects from elements
-      useTags.ts                     # Tag autocomplete, CRUD
-      useResponsive.ts               # Breakpoint-aware reactive state
+      useKeyboardShortcuts.ts        # Global keyboard shortcut handler
+      useResponsive.ts               # Breakpoint-aware reactive state (4 breakpoints)
     types/
       index.ts                       # TypeScript interfaces mirroring backend models
     assets/
       logo.svg
+      main.css
 ```
 
 ### 4.2 Key Composables
@@ -410,13 +468,18 @@ interface UseSearch {
 
 #### `useDocumentViewer(documentId, initialPage?)`
 
+Accepts either a string or a `Ref<string | null>` for `documentId`. When a ref is passed, the composable watches for changes and reloads automatically.
+
 ```typescript
 interface UseDocumentViewer {
-  document: Ref<Document>
+  document: Ref<Document | null>
   pages: Ref<DocumentPage[]>
   currentPage: Ref<number>
   totalPages: Ref<number>
   zoom: Ref<number>
+  loading: Ref<boolean>
+  pdfDoc: Ref<any>               // Raw PDF.js document object
+  fileUrl: Ref<string>           // URL to the original file for rendering
   goToPage(n: number): void
   nextPage(): void
   prevPage(): void
@@ -426,11 +489,11 @@ interface UseDocumentViewer {
 }
 ```
 
-#### `useHighlights(page, searchResult?)`
+#### `useHighlights(elements, pageNumber, searchContent?)`
 
 ```typescript
 interface UseHighlights {
-  highlights: Ref<HighlightRect[]>  // Array of { x, y, width, height } in page coordinates
+  highlights: Computed<HighlightRect[]>  // Array of { x, y, width, height, text, elementId, elementType }
   activeHighlight: Ref<HighlightRect | null>
   scrollToFirstHighlight(): void
 }
@@ -442,23 +505,49 @@ Computes highlight rectangles by:
 3. Extracting bounding region polygons from `element_data`.
 4. Converting polygon coordinates to page-relative rectangles scaled to the current zoom level.
 
+#### `useKeyboardShortcuts()`
+
+Registers global `keydown` listeners for `Cmd+K`, `/`, and `Escape`. Automatically cleans up on component unmount.
+
+#### `useResponsive()`
+
+```typescript
+interface UseResponsive {
+  isMobile: Ref<boolean>   // < 768px
+  isTablet: Ref<boolean>   // 768–1023px
+  isDesktop: Ref<boolean>  // 1024–1279px
+  isWide: Ref<boolean>     // >= 1280px
+}
+```
+
+Uses `matchMedia` listeners for efficient breakpoint tracking.
+
 ## 5. Routing
 
 ```typescript
 const routes = [
-  { path: '/',            redirect: '/documents' },
-  { path: '/upload',      component: () => import('./views/UploadView.vue') },
-  { path: '/documents',   component: () => import('./views/DocumentsView.vue') },
-  { path: '/documents/:id', component: () => import('./views/DocumentDetailView.vue') },
-  { path: '/documents/:id/view', component: () => import('./views/DocumentViewer.vue') },
-  { path: '/search',      component: () => import('./views/SearchView.vue') },
-  { path: '/cases',       component: () => import('./views/CasesView.vue') },
-  { path: '/cases/:id',   component: () => import('./views/CaseDetailView.vue') },
-  { path: '/settings',    component: () => import('./views/SettingsView.vue') },
+  // Primary routes
+  { path: '/',          name: 'gallery',     component: GalleryView,        meta: { tab: 'documents' } },
+  { path: '/doc/:id',   name: 'doc-viewer',  component: GalleryView,        meta: { tab: 'documents' } },
+  { path: '/cases',     name: 'cases',       component: CasesGalleryView,   meta: { tab: 'cases' } },
+  { path: '/cases/:id', name: 'case-detail', component: CaseDetailView,     meta: { tab: 'cases' } },
+  { path: '/upload',    name: 'upload',      component: GalleryView,        meta: { tab: 'documents', modal: 'upload' } },
+  { path: '/settings',  name: 'settings',    component: GalleryView,        meta: { tab: 'documents', modal: 'settings' } },
+
+  // Legacy redirects (backward compatibility)
+  { path: '/documents',          redirect: '/' },
+  { path: '/documents/:id',      redirect: to => `/doc/${to.params.id}` },
+  { path: '/documents/:id/view', redirect: to => `/doc/${to.params.id}` },
+  { path: '/search',             redirect: to => ({ path: '/', query: to.query }) },
 ]
 ```
 
 All routes are lazy-loaded for optimal bundle splitting.
+
+**Route guard behavior:**
+- `beforeEach` syncs `activeTab` from `route.meta.tab`.
+- For `/doc/:id` routes, the guard calls `appStore.openViewer(id, page)` to open the right panel.
+- Navigating away from `/doc/` routes closes the viewer.
 
 ## 6. API Client
 
@@ -478,6 +567,13 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+```
+
+Additional API module:
+
+```typescript
+// api/health.ts
+export async function checkHealth(): Promise<{ status: string; latencyMs: number }>
 ```
 
 ## 7. Visual Design Guidelines
@@ -513,7 +609,9 @@ api.interceptors.response.use(
 - Card padding: 16px (desktop), 12px (mobile).
 - Card border-radius: 8px.
 - Button height: 36px (default), 32px (compact), 40px (large).
-- Sidebar width: 240px expanded, 64px collapsed.
+- Sidebar width: 240px expanded, 64px collapsed (icon rail).
+- Top bar height: defined by `--height-topbar` CSS variable.
+- Right viewer panel: 420px default, 300px – 75% viewport resize range.
 
 ### 7.4 Shadows & Borders
 
@@ -535,7 +633,7 @@ api.interceptors.response.use(
 ## 9. Accessibility
 
 - All interactive elements are keyboard-navigable with visible focus rings.
-- ARIA labels on icon-only buttons.
+- ARIA labels on icon-only buttons (sidebar toggle, theme toggle, settings, close, maximize).
 - Color contrast ratios meet WCAG 2.1 AA (4.5:1 for text, 3:1 for UI components).
 - Screen-reader announcements for toast notifications via `aria-live="polite"`.
 - Drop zone is activatable via keyboard (Enter/Space).
@@ -544,16 +642,21 @@ api.interceptors.response.use(
 
 - **Code splitting** -- every route is lazy-loaded.
 - **Virtual scrolling** -- document and search result lists use virtual scrolling for lists exceeding 100 items.
-- **Debounced search** -- 300ms debounce on search input to avoid excessive API calls.
+- **Debounced search** -- 300ms debounce on search input in the Top Bar to avoid excessive API calls.
 - **PDF page caching** -- PDF.js renders only the visible page and one page ahead/behind; decoded pages are cached in memory (LRU, max 10 pages).
 - **Image thumbnails** -- document grid view uses server-generated thumbnails (future backend endpoint) with lazy loading via `IntersectionObserver`.
 - **Bundle size** -- PDF.js worker loaded as a separate chunk; Tailwind purges unused styles in production.
+- **URL-driven state** -- filters and search queries are synced to URL params, avoiding unnecessary store hydration on navigation.
 
 ## 11. Future Considerations
 
+- **Case timeline / activity log** -- a timeline of actions taken on a case (document added, status changed, etc.).
+- **DocumentElement collapsible list** -- browsable list of parsed elements grouped by page in the viewer panel.
+- **Raw JSON toggle** -- button in the viewer panel (advanced mode) to view raw document/page JSON from the API.
 - **Real-time updates** -- WebSocket or SSE for parse-status changes and batch progress.
 - **Collaborative annotations** -- multiple users highlighting and commenting on document pages.
 - **Saved searches** -- persist search configurations as named presets.
 - **Export** -- export search results or case document lists as CSV/PDF reports.
-- **Drag-and-drop case assignment** -- drag documents from the document list directly onto a case in the sidebar.
+- **Drag-and-drop case assignment** -- drag documents from the gallery directly onto a case in the sidebar.
 - **Offline support** -- service worker caching for recently viewed documents.
+- **Duplicate detection** -- surface duplicate documents in the viewer panel (UI placeholder exists).

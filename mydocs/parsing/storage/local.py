@@ -7,7 +7,7 @@ from datetime import datetime
 import aiofiles
 
 import mydocs.config as C
-from mydocs.parsing.models import FileMetadata
+from mydocs.models import FileMetadata
 from mydocs.parsing.storage.base import FileStorage
 
 

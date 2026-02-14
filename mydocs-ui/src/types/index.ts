@@ -4,7 +4,7 @@ export type StorageMode = 'managed' | 'external'
 export type StorageBackend = 'local' | 'azure_blob' | 's3' | 'gcs' | 'onedrive'
 export type DocumentStatus = 'new' | 'parsing' | 'parsed' | 'failed' | 'skipped' | 'not_supported'
 export type DocumentElementType = 'paragraph' | 'table' | 'key_value_pair' | 'image' | 'barcode'
-export type DocumentType = 'generic'
+export type DocumentType = 'generic' | string
 export type SearchMode = 'fulltext' | 'vector' | 'hybrid'
 export type SearchTarget = 'pages' | 'documents'
 
@@ -82,10 +82,13 @@ export interface DocumentListParams {
   page_size?: number
   status?: string
   file_type?: string
+  document_type?: string
   tags?: string
   sort_by?: string
   sort_order?: string
   search?: string
+  date_from?: string
+  date_to?: string
 }
 
 export interface IngestRequest {
@@ -188,6 +191,23 @@ export interface VectorIndexInfo {
   field: string
   dimensions: number
   similarity: string
+}
+
+// Cases
+export interface Case {
+  id: string
+  name: string
+  description?: string
+  document_ids: string[]
+  created_at?: string
+  modified_at?: string
+}
+
+export interface CaseListResponse {
+  cases: Case[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface HighlightRect {

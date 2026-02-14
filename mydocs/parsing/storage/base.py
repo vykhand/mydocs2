@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from mydocs.parsing.models import FileMetadata
+from mydocs.models import FileMetadata
 
 
 class FileStorage(ABC):

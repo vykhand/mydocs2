@@ -19,6 +19,9 @@
 
   --width-sidebar: 240px;
   --width-sidebar-collapsed: 64px;
+  --width-sidebar-expanded: 260px;
+  --width-viewer: 420px;
+  --height-topbar: 56px;
 }
 
 /* Dark mode overrides */
