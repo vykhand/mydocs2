@@ -1,0 +1,7 @@
+- name: summary
+  description: A concise summary of the document's content and key points
+  data_type: text
+  prompt: >
+    Provide a concise summary of the entire document, capturing the main
+    topic, key points, and any important conclusions or findings.
+  group: 0
