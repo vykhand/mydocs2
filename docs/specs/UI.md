@@ -317,6 +317,23 @@ A modal dialog (`CreateCaseDialog`) with:
 | Remove document     | Per-row action to unassign a document from the case (does not delete the document). |
 | Bulk actions        | Select multiple documents > Remove from Case, Add Tags. |
 
+#### Extraction Results Tab
+
+The Case Detail view includes an **Extraction Results** tab alongside the Documents tab.
+
+| Element              | Description |
+|----------------------|-------------|
+| Tab button           | "Extraction Results" in the sub-navigation tabs. Clicking loads any existing results from the backend. |
+| Extract button       | Primary action button ("Extract") in the tab toolbar. Triggers LLM extraction for each document in the case sequentially, sending `POST /api/v1/extract` per document. |
+| Progress indicator   | Shown during extraction: spinner with "Extracting N/M: filename" message. |
+| Results accordion    | Per-document collapsible sections. Each section header shows the document name and field count. Expanding reveals field results. |
+| Field result card    | Shows field name (uppercase label), content value, and optional justification and citation sections. |
+| Empty state          | "No extraction results yet. Click Extract to run extraction on case documents." |
+
+**API Integration**:
+- **Extract**: `POST /api/v1/extract` with `{ case_id, case_type, document_type: "generic", document_ids: [doc_id], content_mode: "markdown", reference_granularity: "none" }`
+- **Load results**: `GET /api/v1/field-results?document_id=<id>` for each document in the case
+
 #### Data Model
 
 The `Case` model is defined in `mydocs/models.py:Case`. See [backend.md](backend.md) Section 3.9 for the full Case API contract (8 endpoints).
@@ -373,6 +390,7 @@ mydocs-ui/
       documents.ts                   # Document API calls
       search.ts                      # Search API calls
       cases.ts                       # Case API calls
+      extract.ts                     # Extraction API calls
       health.ts                      # Health check with latency measurement
     views/
       GalleryView.vue                # Primary view: document gallery + search results

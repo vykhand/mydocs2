@@ -164,6 +164,28 @@ async def get_fulltext_retriever(
     return pages
 
 
+async def get_document_pages_retriever(
+    query: str,
+    retriever_config: RetrieverConfig,
+    retriever_filter: Optional[RetrieverFilter] = None,
+) -> list[DocumentPage]:
+    """Retrieve all pages for given document IDs, sorted by page number.
+
+    Used for simple extraction where all document content is needed.
+    The query parameter is ignored — all pages are returned.
+    """
+    if not retriever_filter or not retriever_filter.document_ids:
+        log.warning("document_pages_retriever called without document_ids, returning empty")
+        return []
+
+    pages = await DocumentPage.afind(
+        {"document_id": {"$in": retriever_filter.document_ids}},
+        sort=[("page_number", 1)],
+    )
+    log.info(f"Document pages retriever returned {len(pages)} pages")
+    return pages
+
+
 async def get_pages_retriever(
     query: str,
     retriever_config: RetrieverConfig,
@@ -186,4 +208,5 @@ async def get_pages_retriever(
 # Register retrievers in the global registry
 RETRIEVERS["vector_retriever"] = get_vector_retriever
 RETRIEVERS["fulltext_retriever"] = get_fulltext_retriever
+RETRIEVERS["document_pages_retriever"] = get_document_pages_retriever
 RETRIEVERS["pages_retriever"] = get_pages_retriever

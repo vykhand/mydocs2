@@ -1,6 +1,6 @@
 """Extraction API routes."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from tinystructlog import get_logger
 
 from mydocs.extracting.extractor import BaseExtractor
@@ -8,6 +8,7 @@ from mydocs.extracting.models import (
     ContentMode,
     ExtractionRequest,
     ExtractionResponse,
+    FieldResultRecord,
     SplitClassifyResult,
 )
 from mydocs.extracting.prompt_utils import get_prompt
@@ -27,6 +28,17 @@ async def extract_fields(request: ExtractionRequest):
         return response
     except Exception as e:
         log.error(f"Extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/field-results")
+async def get_field_results(document_id: str = Query(..., description="Document ID to fetch results for")):
+    """Get stored extraction results for a document."""
+    try:
+        records = await FieldResultRecord.afind({"document_id": document_id})
+        return [r.model_dump(by_alias=False) for r in records]
+    except Exception as e:
+        log.error(f"Failed to fetch field results: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

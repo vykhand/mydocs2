@@ -168,7 +168,29 @@ mydocs migrate run                  # Run all pending migrations
 mydocs migrate list                 # List available migration scripts
 ```
 
-### 4.7 `mydocs cases`
+### 4.7 `mydocs extract`
+
+Extract fields from documents in a case using LLM-based extraction.
+
+```
+mydocs extract run <case_id>            # Extract fields for all documents in a case
+    --document-type generic             # Document type (default: generic)
+    --fields field1,field2              # Comma-separated field names (default: all)
+    --output json|table|quiet           # Output format (default: table)
+
+mydocs extract results <case_id>        # Show stored extraction results for a case
+    --output json|table|quiet           # Output format (default: table)
+```
+
+**Examples**:
+```bash
+mydocs extract run abc123
+mydocs extract run abc123 --document-type generic --fields summary
+mydocs extract results abc123
+mydocs extract results abc123 --output json
+```
+
+### 4.8 `mydocs cases`
 
 Case management subcommands.
 
@@ -290,6 +312,7 @@ mydocs2/                            # Project root
         search.py
         docs.py
         cases.py
+        extract.py
         config.py
         migrate.py
       formatters.py                 # Output formatting utilities

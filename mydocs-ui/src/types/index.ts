@@ -197,6 +197,7 @@ export interface VectorIndexInfo {
 export interface Case {
   id: string
   name: string
+  type?: string
   description?: string
   document_ids: string[]
   created_at?: string
@@ -208,6 +209,43 @@ export interface CaseListResponse {
   total: number
   page: number
   page_size: number
+}
+
+// Extraction
+export interface FieldResult {
+  content?: string
+  justification?: string
+  citation?: string
+  created_by?: string
+  created_at?: string
+}
+
+export interface FieldResultRecord {
+  id: string
+  document_id: string
+  document_type: string
+  field_name: string
+  result: FieldResult
+}
+
+export interface ExtractionRequest {
+  case_id?: string
+  case_type?: string
+  document_type: string
+  document_ids?: string[]
+  fields?: string[]
+  content_mode?: string
+  reference_granularity?: string
+}
+
+export interface ExtractionResponse {
+  document_id: string
+  document_type: string
+  case_type: string
+  extraction_mode: string
+  results: Record<string, FieldResult>
+  model_used: string
+  reference_granularity: string
 }
 
 export interface HighlightRect {

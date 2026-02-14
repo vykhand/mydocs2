@@ -28,13 +28,9 @@ llm_kwargs:
   top_p: 0.2
 
 retriever_config:
-  name: vector_retriever
-  index_name: vec_pages_large_dot
-  embedding_model: azure/text-embedding-3-large
-  embedding_field: emb_content_markdown_text_embedding_3_large
+  name: document_pages_retriever
   content_field: content_markdown
-  top_k: 10
-  relevance_score_fn: dotProduct
+  top_k: 50
 
 content_mode: markdown
-reference_granularity: full
+reference_granularity: none

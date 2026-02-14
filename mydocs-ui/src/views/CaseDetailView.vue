@@ -4,14 +4,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCasesStore } from '@/stores/cases'
 import { getCaseDocuments, deleteCase, removeDocumentFromCase, addDocumentsToCase } from '@/api/cases'
 import { listDocuments } from '@/api/documents'
+import { extractFields, getFieldResults } from '@/api/extract'
 import { useToast } from 'vue-toastification'
 import CaseHeader from '@/components/cases/CaseHeader.vue'
 import LoadingSkeleton from '@/components/common/LoadingSkeleton.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
-import { Trash2, Plus, Search } from 'lucide-vue-next'
-import type { Document } from '@/types'
+import { Trash2, Plus, Search, Play, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import type { Document, FieldResultRecord } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +32,13 @@ const addDocsSearch = ref('')
 const addDocsResults = ref<Document[]>([])
 const addDocsLoading = ref(false)
 const selectedDocIds = ref<Set<string>>(new Set())
+
+// Extraction state
+const extracting = ref(false)
+const extractionProgress = ref('')
+const extractionResults = ref<Record<string, FieldResultRecord[]>>({})
+const loadingResults = ref(false)
+const expandedDocs = ref<Set<string>>(new Set())
 
 async function loadDocs() {
   loadingDocs.value = true
@@ -103,6 +111,68 @@ async function confirmAddDocs() {
   } catch { /* interceptor */ }
 }
 
+function toggleDocExpanded(docId: string) {
+  const s = new Set(expandedDocs.value)
+  if (s.has(docId)) s.delete(docId)
+  else s.add(docId)
+  expandedDocs.value = s
+}
+
+async function handleExtract() {
+  if (!documents.value.length) {
+    toast.warning('No documents in this case to extract')
+    return
+  }
+
+  extracting.value = true
+  try {
+    for (let i = 0; i < documents.value.length; i++) {
+      const doc = documents.value[i]
+      extractionProgress.value = `Extracting ${i + 1}/${documents.value.length}: ${doc.original_file_name}`
+      try {
+        await extractFields({
+          case_id: caseId,
+          case_type: casesStore.currentCase?.type || 'generic',
+          document_type: 'generic',
+          document_ids: [doc.id],
+          content_mode: 'markdown',
+          reference_granularity: 'none',
+        })
+      } catch {
+        toast.error(`Extraction failed for ${doc.original_file_name}`)
+      }
+    }
+    toast.success('Extraction complete')
+    await loadExtractionResults()
+  } finally {
+    extracting.value = false
+    extractionProgress.value = ''
+  }
+}
+
+async function loadExtractionResults() {
+  loadingResults.value = true
+  try {
+    const results: Record<string, FieldResultRecord[]> = {}
+    for (const doc of documents.value) {
+      const records = await getFieldResults(doc.id)
+      if (records.length) {
+        results[doc.id] = records
+      }
+    }
+    extractionResults.value = results
+    // Auto-expand docs that have results
+    expandedDocs.value = new Set(Object.keys(results))
+  } finally {
+    loadingResults.value = false
+  }
+}
+
+function getDocName(docId: string): string {
+  const doc = documents.value.find(d => d.id === docId)
+  return doc?.original_file_name || docId
+}
+
 onMounted(() => {
   casesStore.fetchCase(caseId)
   loadDocs()
@@ -133,11 +203,14 @@ onMounted(() => {
           Documents ({{ docTotal }})
         </button>
         <button
-          disabled
-          class="pb-2 text-sm font-medium opacity-50 cursor-not-allowed"
-          style="color: var(--color-text-secondary);"
+          @click="activeSubTab = 'extraction'; loadExtractionResults()"
+          class="pb-2 text-sm font-medium border-b-2 transition-colors"
+          :style="{
+            color: activeSubTab === 'extraction' ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+            borderBottomColor: activeSubTab === 'extraction' ? 'var(--color-accent)' : 'transparent',
+          }"
         >
-          Extraction Results (coming soon)
+          Extraction Results
         </button>
       </div>
 
@@ -187,6 +260,87 @@ onMounted(() => {
         <div v-else class="text-center py-12">
           <p class="text-sm" style="color: var(--color-text-secondary);">
             No documents in this case yet.
+          </p>
+        </div>
+      </div>
+
+      <!-- Extraction Results sub-tab -->
+      <div v-if="activeSubTab === 'extraction'">
+        <div class="flex justify-end mb-3">
+          <button
+            @click="handleExtract"
+            :disabled="extracting || !documents.length"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-50"
+            style="background-color: var(--color-accent); color: white;"
+          >
+            <Play :size="14" />
+            {{ extracting ? 'Extracting...' : 'Extract' }}
+          </button>
+        </div>
+
+        <!-- Extraction progress -->
+        <div v-if="extracting" class="mb-4 px-4 py-3 rounded-lg border" style="border-color: var(--color-border); background-color: var(--color-bg-secondary);">
+          <div class="flex items-center gap-3">
+            <div class="animate-spin w-4 h-4 border-2 border-t-transparent rounded-full" style="border-color: var(--color-accent); border-top-color: transparent;" />
+            <p class="text-sm" style="color: var(--color-text-secondary);">{{ extractionProgress }}</p>
+          </div>
+        </div>
+
+        <LoadingSkeleton v-if="loadingResults" />
+
+        <div v-else-if="Object.keys(extractionResults).length" class="space-y-2">
+          <!-- Per-document accordion -->
+          <div
+            v-for="docId in Object.keys(extractionResults)"
+            :key="docId"
+            class="rounded-lg border overflow-hidden"
+            style="border-color: var(--color-border);"
+          >
+            <!-- Document header -->
+            <button
+              @click="toggleDocExpanded(docId)"
+              class="w-full flex items-center gap-2 px-4 py-3 text-left"
+              style="background-color: var(--color-bg-secondary);"
+            >
+              <component :is="expandedDocs.has(docId) ? ChevronDown : ChevronRight" :size="16" style="color: var(--color-text-secondary);" />
+              <span class="text-sm font-medium" style="color: var(--color-text-primary);">
+                {{ getDocName(docId) }}
+              </span>
+              <span class="text-xs ml-auto" style="color: var(--color-text-secondary);">
+                {{ extractionResults[docId].length }} field(s)
+              </span>
+            </button>
+
+            <!-- Field results -->
+            <div v-if="expandedDocs.has(docId)" class="divide-y" style="border-color: var(--color-border);">
+              <div
+                v-for="record in extractionResults[docId]"
+                :key="record.field_name"
+                class="px-4 py-3"
+                style="background-color: var(--color-bg-primary);"
+              >
+                <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color: var(--color-text-secondary);">
+                  {{ record.field_name }}
+                </p>
+                <p class="text-sm whitespace-pre-wrap" style="color: var(--color-text-primary);">
+                  {{ record.result.content || '(empty)' }}
+                </p>
+                <div v-if="record.result.justification" class="mt-2">
+                  <p class="text-xs font-medium" style="color: var(--color-text-secondary);">Justification</p>
+                  <p class="text-xs mt-0.5" style="color: var(--color-text-secondary);">{{ record.result.justification }}</p>
+                </div>
+                <div v-if="record.result.citation" class="mt-2">
+                  <p class="text-xs font-medium" style="color: var(--color-text-secondary);">Citation</p>
+                  <p class="text-xs mt-0.5 italic" style="color: var(--color-text-secondary);">{{ record.result.citation }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="!extracting" class="text-center py-12">
+          <p class="text-sm" style="color: var(--color-text-secondary);">
+            No extraction results yet. Click "Extract" to run extraction on case documents.
           </p>
         </div>
       </div>

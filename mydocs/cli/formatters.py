@@ -271,6 +271,52 @@ def format_case_show(case, mode: str) -> None:
         print_table(headers, rows)
 
 
+def format_extraction_result(response, document_name: str, mode: str) -> None:
+    """Format and print an extraction response."""
+    if mode == "json":
+        print(response.model_dump_json(indent=2))
+    elif mode == "quiet":
+        print(f"{document_name}\t{len(response.results)} fields")
+    else:
+        headers = ["Field", "Content", "Justification"]
+        rows = []
+        for field_name, result in response.results.items():
+            content = result.get("content", "") if isinstance(result, dict) else (result.content or "")
+            justification = result.get("justification", "") if isinstance(result, dict) else (result.justification or "")
+            # Truncate long values for table display
+            if len(content) > 80:
+                content = content[:77] + "..."
+            if len(justification) > 60:
+                justification = justification[:57] + "..."
+            rows.append([field_name, content, justification])
+        print_table(headers, rows)
+        print(f"\nModel: {response.model_used}")
+
+
+def format_field_results(records, mode: str) -> None:
+    """Format and print stored field result records."""
+    if mode == "json":
+        print(json.dumps(
+            [r.model_dump(by_alias=False, exclude_none=True) for r in records],
+            indent=2,
+            default=str,
+        ))
+    elif mode == "quiet":
+        print(len(records))
+    else:
+        headers = ["Field", "Content", "Justification"]
+        rows = []
+        for r in records:
+            content = r.result.content or ""
+            justification = r.result.justification or ""
+            if len(content) > 80:
+                content = content[:77] + "..."
+            if len(justification) > 60:
+                justification = justification[:57] + "..."
+            rows.append([r.field_name, content, justification])
+        print_table(headers, rows)
+
+
 def format_config(serialized_config, mode: str) -> None:
     """Format and print configuration."""
     if mode == "json":
