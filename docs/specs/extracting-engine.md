@@ -20,6 +20,11 @@ The engine operates on `Document` and `DocumentPage` models from [parsing-engine
 
 ### 1.1 Key Concepts
 
+```todo
+TODO: this specification is missing a concept of "cases" that are used to group documents
+the cases have types (right now only one, generic). Extracting takes all configs and prompts from case_type.lower()/document_type.lower().
+```
+
 | Concept | Description |
 |---------|-------------|
 | **Field** | A named piece of information to extract (e.g., "DateOfLoss", "PolicyNumber"). Replaces "attribute" from prior systems. |
@@ -234,7 +239,7 @@ class SplitSegment(BaseModel):
     """A classified segment within a multi-document file."""
     document_type: str                           # Classified type for this segment
     page_numbers: list[int]                      # 1-based page numbers belonging to segment
-    confidence: Optional[float] = None           # Classification confidence
+    confidence: Optional[float] = None           # Classification confidence #TODO: No need for confidence here
 
 class SplitClassifyResult(BaseModel):
     """Result of splitting and classifying a document."""
@@ -288,6 +293,13 @@ model: gpt-4.1
  ExtractionRequest -> retrieve context -> LLM extraction  ->  resolve refs    ->  FieldResults
                       per group           per group            per group            combined
 ```
+
+```todo
+TODO: if we used raw pydantic as output (not FieldResult), we need an optional extra llm step, which will pass html/markdown context and will return references for all the pydantic fields.
+the need to do this step should be configurable for the extraction request.
+TODO: This flow should respect concept of cases and case types. when case type is not specified, it should default to 'generic'
+```
+
 
 ### 4.2 Detailed Flow
 
@@ -350,6 +362,12 @@ For each group of fields:
 
 - Merge results from all groups into a single `dict[str, FieldResult]`
 - Return `ExtractionResponse`
+
+```todo
+TODO: if the granularity was null, additional step should be added to infer the references.
+For example: Pydantic result passed as structure for the output, the result is extracted from context that does not have references, and then another pass is performed, where the previous result is added to the prompt together with the context that contains references. 
+Then, LLM infers references from the context and returns the result.
+```
 
 ### 4.3 Reference String Format
 
@@ -641,6 +659,12 @@ RETRIEVERS: dict[str, Callable] = {
 
 ## 9. Configuration File Layout
 
+
+```todo
+#TODO: above document type, there is case type (generic by default)
+document type and case type can be any case in the database, but always lower in the config and in the file system.
+split_classify prompts are under case_type as they are case type specific.
+```
 ### 9.1 Directory Structure
 
 ```
@@ -786,7 +810,20 @@ Pass `field_overrides` in the `ExtractionRequest`:
 ## 11. Custom Pydantic Structure Extraction
 
 For extracting structured data that doesn't fit the flat field model (e.g., line items, nested records), the engine supports custom Pydantic output schemas.
+```todo
+#TODO: this is for "one pass" logic, where system extracts references rigt away.
+For reference granularity none, and multi pass option, we can pass an object like this:
 
+class AmountTable(BaseModel):
+    line_items: list[AmountTableLineItem]
+class AmountTableLineItem(BaseModel):
+    description: str
+    quantity: float
+    unit_price: float
+    amount: float
+    
+and then at the second pass, the system will give us the references for each resulting field (think through what would be the good format, must support arbitrary nesting)
+```
 ### 11.1 Defining a Custom Schema
 
 ```python
@@ -846,6 +883,11 @@ When enriching results from custom schemas, the engine:
 
 ### 12.1 Collections
 
+```todo:
+TODO: we need a collection to store user defined fields, that are going to be used as field overrides.
+
+```
+
 | Collection | Model | Description |
 |------------|-------|-------------|
 | `field_definitions` | `FieldDefinition` | System-managed field definitions (synced from YAML) |
@@ -904,6 +946,11 @@ config/
 ---
 
 ## 14. Dependencies
+
+```todo:
+TODO: the extracting logic is implemented in langgraph async calls
+Remember that this code is an evolution of /Users/DEV/spl_deep_ai, but should not necessarily copy it.
+```
 
 | Package | Purpose |
 |---------|---------|
