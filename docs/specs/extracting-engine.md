@@ -20,19 +20,28 @@ The engine operates on `Document` and `DocumentPage` models from [parsing-engine
 
 ### 1.1 Key Concepts
 
-```todo
-TODO: this specification is missing a concept of "cases" that are used to group documents
-the cases have types (right now only one, generic). Extracting takes all configs and prompts from case_type.lower()/document_type.lower().
-```
-
 | Concept | Description |
 |---------|-------------|
+| **Case** | A container that groups related documents for processing. Has a `type` field (e.g., `"generic"`, `"insurance_claim"`). Stored in the `cases` MongoDB collection. |
+| **Case Type** | The `Case.type` value that determines which config directory tree is used. Default: `"generic"`. Maps to `{case.type.lower()}/` in the config hierarchy. |
 | **Field** | A named piece of information to extract (e.g., "DateOfLoss", "PolicyNumber"). Replaces "attribute" from prior systems. |
 | **Document Type** | A classification that determines which fields and prompts apply (e.g., `claim`, `policy`, `invoice`). Extends `DocumentTypeEnum`. Replaces "attribute_type" from prior systems. |
 | **Field Definition** | Configuration for a field: name, description, extraction prompt, data type, allowed values. |
 | **Prompt Config** | LLM prompt template and retrieval settings for a group of fields. |
 | **Field Result** | The extraction output: value, citation, justification, and optionally polygon references. |
+| **Extraction Mode** | Controls output structure: `referenced` (FieldResult with citations/references) or `direct` (raw Pydantic structured output, optionally followed by a reference-inference pass). |
 | **Reference Granularity** | Controls how much source-location detail is returned: `full`, `page`, or `none`. |
+
+> **Note — Case model change**: The `Case` model (from `mydocs/models.py`) requires a new `type` field:
+>
+> ```python
+> class Case(MongoBaseModel):
+>     name: str
+>     type: str = "generic"                        # Case type — determines config directory
+>     description: Optional[str] = None
+>     document_ids: list[str] = Field(default_factory=list)
+>     ...
+> ```
 
 ---
 
@@ -75,7 +84,17 @@ class ContentMode(StrEnum):
     HTML = "html"            # content_html with id attributes
 ```
 
-#### 2.1.4 FieldDataType
+#### 2.1.4 ExtractionMode
+
+Controls the output structure of extraction results.
+
+```python
+class ExtractionMode(StrEnum):
+    REFERENCED = "referenced"  # Fields wrapped in FieldResult (citations, references)
+    DIRECT = "direct"          # Raw Pydantic model via LLM structured output
+```
+
+#### 2.1.5 FieldDataType
 
 Semantic data type hint for extracted field values.
 
@@ -118,7 +137,13 @@ class FieldDefinition(BaseModel):
 
 ### 2.3 Field Result
 
-The output of extracting a single field. The level of detail depends on `ReferenceGranularity`.
+The extraction engine supports two output modes:
+
+**Referenced mode** (`extraction_mode = "referenced"`): The LLM returns `LLMFieldItem` objects containing value, justification, citation, and element references. These are enriched into `FieldResult` objects with polygon data. This is the default.
+
+**Direct mode** (`extraction_mode = "direct"`): A user-supplied Pydantic model is passed directly to the LLM's structured output. The result contains native Python types (str, float, etc.) with no references. Optionally, a second pass can infer references (see Section 4.2, Step 4).
+
+The level of detail in referenced mode depends on `ReferenceGranularity`.
 
 ```python
 class Reference(BaseModel):
@@ -152,11 +177,23 @@ class FieldResult(BaseModel):
 ```
 
 When `reference_granularity = "none"`, only `content` is populated. When `"page"`, `content`, `justification`, `citation`, and `page_references` are populated. When `"full"`, all fields including `references` with polygon data.
-```todo 
-TODO: Change the data model for result. When granularity is None, we just use regular types for return values.
-Essentially, we should have multiple modes of extraction: Pydantic models where the bottom level fields are FieldResult, 
-and extraction will return and resolve references, or, just a pydantic class that is passed directly to the model structured outputs.
-For the latter scenario, we can have a second pass option to give model the original iformation and then generate references with extra LLM call.
+
+#### 2.3.1 Reference Inference Models (Direct Mode)
+
+When using direct mode with `infer_references = True`, the reference-inference pass produces the following models:
+
+```python
+class FieldReference(BaseModel):
+    """Reference annotation for a single leaf field in direct mode."""
+    field_path: str                              # JSONPath-like: "line_items[0].amount"
+    citation: Optional[str] = None
+    justification: Optional[str] = None
+    references: Optional[list[Reference]] = None
+    page_references: Optional[list[PageReference]] = None
+
+class ReferenceInferenceResult(BaseModel):
+    """Output of the reference-inference pass."""
+    field_references: list[FieldReference]
 ```
 
 ### 2.4 LLM Input/Output Models
@@ -198,18 +235,26 @@ class LLMLineItemsResult(BaseModel):
 Custom schemas are registered in the schema registry (Section 8.2) and referenced by name in prompt configs.
 
 ### 2.5 Extraction Request
-```todo
-TODO: Extraction requests should be dependent on case type and document type.
-Document ids or page ids or a file_ids are parameters for the retriever
 
-```
 ```python
 class ExtractionRequest(BaseModel):
     """Request to extract fields from documents."""
-    document_ids: list[str]                      # Documents to extract from
+    case_id: Optional[str] = None                # Case to extract from (case_type resolved from Case.type)
+    case_type: str = "generic"                   # Override: determines config directory. If case_id provided, defaults to Case.type
     document_type: str                           # Which document type's fields to extract
-    fields: Optional[list[str]] = None           # Specific fields (None = all for type)
-    field_overrides: Optional[list[FieldDefinition]] = None  # Ad-hoc field definitions
+    extraction_mode: ExtractionMode = ExtractionMode.REFERENCED
+    output_schema: Optional[str] = None          # For direct mode: registered schema name
+    infer_references: bool = False               # For direct mode: run reference-inference pass
+
+    # Retriever scope (at least one required)
+    document_ids: Optional[list[str]] = None
+    page_ids: Optional[list[str]] = None
+    file_ids: Optional[list[str]] = None
+
+    # Field selection
+    fields: Optional[list[str]] = None
+    field_overrides: Optional[list[FieldDefinition]] = None
+
     reference_granularity: ReferenceGranularity = ReferenceGranularity.FULL
     content_mode: ContentMode = ContentMode.MARKDOWN
 ```
@@ -221,10 +266,16 @@ class ExtractionResponse(BaseModel):
     """Response from field extraction."""
     document_id: str
     document_type: str
-    results: dict[str, FieldResult]              # field_name -> FieldResult
-    model_used: str                              # LLM model identifier
+    case_type: str
+    extraction_mode: str
+    results: dict                                # Referenced: {field_name: FieldResult}
+                                                 # Direct: serialized Pydantic model as dict
+    reference_annotations: Optional[list[FieldReference]] = None  # Direct mode + infer_references
+    model_used: str
     reference_granularity: str
 ```
+
+Note: In referenced mode, `results` is `dict[str, FieldResult]`. In direct mode, `results` is the Pydantic model serialized via `.model_dump()`. The `extraction_mode` field tells the consumer how to interpret `results`.
 
 ---
 
@@ -237,9 +288,8 @@ When a file contains multiple logical documents (e.g., a PDF with several invoic
 ```python
 class SplitSegment(BaseModel):
     """A classified segment within a multi-document file."""
-    document_type: str                           # Classified type for this segment
-    page_numbers: list[int]                      # 1-based page numbers belonging to segment
-    confidence: Optional[float] = None           # Classification confidence #TODO: No need for confidence here
+    document_type: str
+    page_numbers: list[int]
 
 class SplitClassifyResult(BaseModel):
     """Result of splitting and classifying a document."""
@@ -289,16 +339,13 @@ model: gpt-4.1
 ### 4.1 Pipeline Overview
 
 ```
-[Input]              [Retrieval]          [Extraction]         [Enrichment]         [Output]
- ExtractionRequest -> retrieve context -> LLM extraction  ->  resolve refs    ->  FieldResults
-                      per group           per group            per group            combined
+[Input]              [Config]           [Retrieval]          [Extraction]         [Ref Inference]      [Enrichment]         [Output]
+ ExtractionRequest -> load configs   -> retrieve context -> LLM extraction  ->  (optional pass 2) -> resolve refs    ->  Response
+                      by case_type/     per group           per group            direct mode only     referenced mode
+                      document_type
 ```
 
-```todo
-TODO: if we used raw pydantic as output (not FieldResult), we need an optional extra llm step, which will pass html/markdown context and will return references for all the pydantic fields.
-the need to do this step should be configurable for the extraction request.
-TODO: This flow should respect concept of cases and case types. when case type is not specified, it should default to 'generic'
-```
+When `case_type` is not specified, it defaults to `"generic"`.
 
 
 ### 4.2 Detailed Flow
@@ -307,6 +354,9 @@ For each extraction request, the engine executes a graph-based workflow:
 
 #### Step 1: Initialize
 
+- Resolve `case_type`: use `Case.type` if `case_id` is provided, otherwise use the request's `case_type` (default `"generic"`)
+- Load configs from `config/extracting/{case_type}/{document_type}/`
+- If `extraction_mode = "direct"`, load the output schema from the registry
 - Load `FieldDefinition` list for the requested `document_type`
 - If `fields` is specified, filter to only those fields
 - If `field_overrides` is provided, merge/replace matching field definitions
@@ -360,14 +410,24 @@ For each group of fields:
 
 #### Step 3: Combine Results
 
-- Merge results from all groups into a single `dict[str, FieldResult]`
-- Return `ExtractionResponse`
+- Merge results from all groups into a single `dict[str, FieldResult]` (referenced mode) or a combined dict (direct mode)
 
-```todo
-TODO: if the granularity was null, additional step should be added to infer the references.
-For example: Pydantic result passed as structure for the output, the result is extracted from context that does not have references, and then another pass is performed, where the previous result is added to the prompt together with the context that contains references. 
-Then, LLM infers references from the context and returns the result.
-```
+#### Step 4: Reference Inference (Direct Mode Only)
+
+When `extraction_mode = "direct"` and `infer_references = True`:
+
+1. Take the direct extraction result from Step 2d
+2. Re-retrieve context using the same retriever, but with `content_mode` that includes element annotations (markdown with `[short_id]` or HTML with `id` attributes)
+3. Build a prompt containing:
+   - The original extracted values (serialized as JSON)
+   - The annotated document context
+   - Instructions to identify which elements support each extracted value
+4. LLM returns `ReferenceInferenceResult` — a list of `FieldReference` with `field_path` pointing to each leaf field and its supporting element references
+5. Optionally resolve references to polygons (same as Step 2e enrichment)
+
+#### Step 5: Return Response
+
+- Return `ExtractionResponse` with `results`, `extraction_mode`, and optionally `reference_annotations`
 
 ### 4.3 Reference String Format
 
@@ -427,6 +487,7 @@ class RetrieverConfig(BaseModel):
 class PromptConfig(BaseModel):
     """LLM prompt configuration for field extraction."""
     name: str                                    # Prompt identifier
+    case_type: str = "generic"                   # Which case type this applies to
     document_type: Optional[str] = None          # Which document type this applies to
     groups: Optional[list[int]] = None           # Which field groups (None/[0] = default)
     output_schema: str = "default"               # Schema name from registry
@@ -660,37 +721,35 @@ RETRIEVERS: dict[str, Callable] = {
 ## 9. Configuration File Layout
 
 
-```todo
-#TODO: above document type, there is case type (generic by default)
-document type and case type can be any case in the database, but always lower in the config and in the file system.
-split_classify prompts are under case_type as they are case type specific.
-```
 ### 9.1 Directory Structure
 
 ```
 config/
-  parser.yml                              # Parsing config (from parsing-engine.md)
+  parser.yml
   extracting/
-    {document_type}/                      # e.g., claim/, policy/, invoice/
-      fields/
-        {document_type}.yaml              # Group 0 field definitions
-        {document_type}_group_1.yaml      # Group 1 field definitions
-        {document_type}_group_2.yaml      # Group 2 field definitions
-      prompts/
-        main.yaml                         # Default prompt (group 0)
-        group_1.yaml                      # Group 1 prompt
-        group_2.yaml                      # Group 2 prompt
-      field_manifest.yaml                 # Hash/version tracking for fields
-      prompt_manifest.yaml                # Hash/version tracking for prompts
-    split_classify/
-      prompts/
-        {name}.yaml                       # Split/classify prompt configs
+    {case_type}/                              # e.g., generic/, insurance_claim/
+      {document_type}/                        # e.g., claim/, policy/, invoice/
+        fields/
+          {document_type}.yaml
+          {document_type}_group_1.yaml
+        prompts/
+          main.yaml
+          group_1.yaml
+        field_manifest.yaml
+        prompt_manifest.yaml
+      split_classify/                         # Case-type level (not document-type)
+        prompts/
+          {name}.yaml
 ```
+
+All directory names are lowercase. Case types and document types can be any value in the database, but are always lowercased for config paths and filesystem directories.
+
+**Config fallback**: If a config is not found under `{case_type}/{document_type}/`, the engine falls back to `generic/{document_type}/`.
 
 ### 9.2 Field Definition YAML
 
 ```yaml
-# config/extracting/claim/fields/claim.yaml
+# config/extracting/generic/claim/fields/claim.yaml
 - name: DateOfLoss
   description: Date on which the loss event occurred
   data_type: date
@@ -724,7 +783,7 @@ config/
 ### 9.3 Prompt YAML
 
 ```yaml
-# config/extracting/claim/prompts/main.yaml
+# config/extracting/generic/claim/prompts/main.yaml
 name: claim_extraction
 document_type: claim
 output_schema: default
@@ -809,22 +868,11 @@ Pass `field_overrides` in the `ExtractionRequest`:
 
 ## 11. Custom Pydantic Structure Extraction
 
-For extracting structured data that doesn't fit the flat field model (e.g., line items, nested records), the engine supports custom Pydantic output schemas.
-```todo
-#TODO: this is for "one pass" logic, where system extracts references rigt away.
-For reference granularity none, and multi pass option, we can pass an object like this:
+For extracting structured data that doesn't fit the flat field model (e.g., line items, nested records), the engine supports custom Pydantic output schemas in both extraction modes.
 
-class AmountTable(BaseModel):
-    line_items: list[AmountTableLineItem]
-class AmountTableLineItem(BaseModel):
-    description: str
-    quantity: float
-    unit_price: float
-    amount: float
-    
-and then at the second pass, the system will give us the references for each resulting field (think through what would be the good format, must support arbitrary nesting)
-```
-### 11.1 Defining a Custom Schema
+### 11.1 Referenced Mode (One-Pass)
+
+In referenced mode, custom schemas use `LLMFieldItem` fields so that references are captured inline:
 
 ```python
 # mydocs/extracting/schemas/invoice.py
@@ -841,14 +889,43 @@ class LLMLineItemsResult(BaseModel):
 
 Each sub-field within the custom model is an `LLMFieldItem`, which provides `content`, `justification`, `citation`, and `references` for every extracted value.
 
-### 11.2 Registering the Schema
+When enriching results from referenced-mode custom schemas, the engine:
+
+1. Iterates over each item in `result`
+2. For each `LLMFieldItem` sub-field, resolves references according to the `reference_granularity`
+3. Converts each `LLMFieldItem` to a `FieldResult`
+4. Returns a list of dicts (one per item), where each dict maps sub-field names to `FieldResult` objects
+
+### 11.2 Direct Mode (Multi-Pass)
+
+In direct mode, custom schemas use native Python types:
+
+```python
+class AmountTableLineItem(BaseModel):
+    description: str
+    quantity: float
+    unit_price: float
+    amount: float
+
+class AmountTable(BaseModel):
+    line_items: list[AmountTableLineItem]
+```
+
+When `infer_references = True`, the reference-inference pass produces `FieldReference` entries with JSONPath-like `field_path` values:
+- `"line_items[0].description"`
+- `"line_items[0].amount"`
+- `"line_items[1].description"` etc.
+
+This flat list of references supports arbitrary nesting depth — each leaf field in the result gets a path-addressable reference annotation.
+
+### 11.3 Registering the Schema
 
 ```python
 from mydocs.extracting.registry import SCHEMAS
 SCHEMAS["invoice_line_items"] = LLMLineItemsResult
 ```
 
-### 11.3 Prompt Config for Custom Schemas
+### 11.4 Prompt Config for Custom Schemas
 
 ```yaml
 name: invoice_line_items
@@ -868,31 +945,31 @@ user_prompt_template: |
 model: gpt-4.1
 ```
 
-### 11.4 Enrichment of Custom Structures
-
-When enriching results from custom schemas, the engine:
-
-1. Iterates over each item in `result`
-2. For each `LLMFieldItem` sub-field, resolves references according to the `reference_granularity`
-3. Converts each `LLMFieldItem` to a `FieldResult`
-4. Returns a list of dicts (one per item), where each dict maps sub-field names to `FieldResult` objects
-
 ---
 
 ## 12. Database Storage
 
 ### 12.1 Collections
 
-```todo:
-TODO: we need a collection to store user defined fields, that are going to be used as field overrides.
-
-```
-
 | Collection | Model | Description |
 |------------|-------|-------------|
 | `field_definitions` | `FieldDefinition` | System-managed field definitions (synced from YAML) |
 | `prompt_configs` | `PromptConfig` | System-managed prompt configurations (synced from YAML) |
 | `field_results` | `FieldResultRecord` | Extracted field values per document |
+| `user_field_definitions` | `UserFieldDefinition` | User-created field definitions used as overrides |
+
+```python
+class UserFieldDefinition(MongoBaseModel):
+    case_type: str = "generic"
+    document_type: str
+    field: FieldDefinition                       # The field definition
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Settings:
+        name = "user_field_definitions"
+        composite_key = ["case_type", "document_type", "field.name"]
+```
 
 ### 12.2 FieldResultRecord
 
@@ -938,22 +1015,19 @@ mydocs/
       __init__.py
 config/
   extracting/
-    {document_type}/
-      fields/
-      prompts/
+    {case_type}/
+      {document_type}/
+        fields/
+        prompts/
 ```
 
 ---
 
 ## 14. Dependencies
 
-```todo:
-TODO: the extracting logic is implemented in langgraph async calls
-Remember that this code is an evolution of /Users/DEV/spl_deep_ai, but should not necessarily copy it.
-```
-
 | Package | Purpose |
 |---------|---------|
+| `langgraph` | Async graph-based workflow orchestration for the extraction pipeline |
 | `lightodm` | MongoDB ODM for field results and config storage |
 | `litellm` | LLM calls (structured output) and embedding generation |
 | `pydantic` | Data models, structured output schemas |
@@ -970,6 +1044,7 @@ Remember that this code is an evolution of /Users/DEV/spl_deep_ai, but should no
 - Uses `content_markdown` and `content_html` page fields for LLM context
 - Uses `element_data` for polygon resolution
 - Extends `DocumentTypeEnum` with extraction-specific types
+- Requires `Case` model update: add `type: str = "generic"` field (see Section 1.1)
 
 ### 15.2 Retrieval Engine
 
@@ -982,10 +1057,10 @@ Remember that this code is an evolution of /Users/DEV/spl_deep_ai, but should no
 Future endpoints:
 
 ```
-POST /api/v1/extract                     # Run field extraction
-POST /api/v1/split-classify              # Run document splitting
-GET  /api/v1/documents/{id}/fields       # Get extracted fields for a document
-GET  /api/v1/field-definitions/{type}    # List field definitions for a document type
+POST /api/v1/extract                     # Run field extraction (accepts case_type)
+POST /api/v1/split-classify              # Run document splitting (accepts case_type)
+GET  /api/v1/cases/{id}/fields           # Get extracted fields for a case
+GET  /api/v1/field-definitions/{case_type}/{doc_type}  # List field definitions
 ```
 
 ### 15.4 CLI

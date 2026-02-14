@@ -142,6 +142,7 @@ class DocumentPage(MongoBaseModel):
 
 class Case(MongoBaseModel):
     name: str
+    type: str = "generic"
     description: Optional[str] = None
     document_ids: List[str] = Field(default_factory=list)
     created_at: Optional[datetime] = None

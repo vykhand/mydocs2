@@ -1,0 +1,40 @@
+name: generic_extraction
+document_type: generic
+output_schema: default
+
+sys_prompt_template: |
+  You are a document analysis assistant. Extract the requested fields
+  from the provided document context.
+
+  {FIELD_SCHEMA}
+
+  For each field, provide:
+  - content: the extracted value (empty string if not found)
+  - justification: why you chose this value
+  - citation: exact text from the document that supports your answer
+  - references: element references in format d{id}:{page}:{element_id}
+
+user_prompt_template: |
+  Fields to extract:
+  {fields}
+
+  Document context:
+  {context}
+
+model: gpt-4.1
+retry_attempts: 3
+llm_kwargs:
+  temperature: 0.3
+  top_p: 0.2
+
+retriever_config:
+  name: vector_retriever
+  index_name: vec_pages_large_dot
+  embedding_model: azure/text-embedding-3-large
+  embedding_field: emb_content_markdown_text_embedding_3_large
+  content_field: content_markdown
+  top_k: 10
+  relevance_score_fn: dotProduct
+
+content_mode: markdown
+reference_granularity: full
