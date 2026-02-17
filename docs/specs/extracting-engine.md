@@ -392,7 +392,9 @@ For each group of fields:
 **2d. LLM Call**
 - Fill prompt templates with `{fields}`, `{context}`, and any schema instructions
 - Call the LLM with structured output matching the group's `output_schema`
-- Retry up to `retry_attempts` times on failure
+- **Two-level retry strategy**:
+  - **Transport retries** (`transport_retries`, passed to litellm as `num_retries`): Handles HTTP 429, 500, 503, connection errors, and timeouts. Managed internally by litellm with exponential backoff. Transport errors (`litellm.exceptions.APIError` and subclasses) are **not** retried by the outer loop since litellm has already exhausted its attempts.
+  - **Validation retries** (`validation_retries`, outer loop): If the LLM returns valid JSON that fails Pydantic `model_validate_json()`, retry the full LLM call. This is rare with `json_schema` structured output mode but provides a safety net.
 - Parse response into `LLMFieldsResult` (or custom schema)
 
 **2e. Enrich Results**
@@ -495,7 +497,8 @@ class PromptConfig(BaseModel):
     sys_prompt_template: str                     # System prompt (supports {FIELD_SCHEMA} placeholder)
     user_prompt_template: str                    # User prompt (supports {fields}, {context} placeholders)
     model: str = "gpt-4.1"                       # LLM model identifier
-    retry_attempts: int = 3
+    validation_retries: int = 3                  # Validation retries (schema parse failures)
+    transport_retries: int = 3                   # Transport retries (passed to litellm)
     llm_kwargs: dict = {}                        # Temperature, top_p, etc.
 
     retriever_config: Optional[RetrieverConfig] = None
@@ -821,7 +824,7 @@ retriever_config:
   top_k: 10
   relevance_score_fn: dotProduct
 
-retry_attempts: 3
+validation_retries: 3
 content_mode: markdown
 reference_granularity: full
 ```

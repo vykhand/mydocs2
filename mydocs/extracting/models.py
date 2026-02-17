@@ -251,7 +251,8 @@ class PromptConfig(BaseModel):
     sys_prompt_template: str
     user_prompt_template: str
     model: str = "gpt-4.1"
-    retry_attempts: int = 3
+    validation_retries: int = 3
+    transport_retries: int = 3
     llm_kwargs: dict = Field(default_factory=dict)
 
     retriever_config: Optional[RetrieverConfig] = None

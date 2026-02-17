@@ -275,30 +275,40 @@ class BaseExtractor:
         prompt_config: Any,
         output_schema: type,
     ) -> Any:
-        """Call the LLM with structured output via litellm."""
+        """Call the LLM with structured output via litellm.
+
+        Uses a two-level retry strategy:
+        - Transport retries (transport_retries): Handled by litellm internally
+          for HTTP 429, 500, 503, connection errors, and timeouts.
+        - Validation retries (validation_retries): Outer loop retries when the
+          LLM returns valid JSON that fails Pydantic model_validate_json().
+        """
         messages = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
         last_error = None
-        for attempt in range(prompt_config.retry_attempts):
+        for attempt in range(prompt_config.validation_retries):
             try:
                 response = await litellm.acompletion(
                     model=prompt_config.model,
                     messages=messages,
                     response_format=output_schema,
+                    num_retries=prompt_config.transport_retries,
                     **prompt_config.llm_kwargs,
                 )
 
                 content = response.choices[0].message.content
-                result = output_schema.model_validate_json(content)
-                return result
+                return output_schema.model_validate_json(content)
+
+            except litellm.exceptions.APIError:
+                raise  # Transport errors already retried by litellm; don't retry again
 
             except Exception as e:
                 last_error = e
                 log.warning(
-                    f"LLM call attempt {attempt + 1}/{prompt_config.retry_attempts} "
+                    f"Validation attempt {attempt + 1}/{prompt_config.validation_retries} "
                     f"failed: {e}"
                 )
 

@@ -84,7 +84,9 @@ The `BaseExtractor` class accepts an `ExtractionRequest` and drives the full pip
 
 **`_call_llm()`** (line 271):
 - Uses `litellm.acompletion()` with `response_format=output_schema`
-- Retries up to `prompt_config.retry_attempts` times
+- Two-level retry strategy:
+  - **Transport retries** (`transport_retries`): Passed to litellm as `num_retries` for HTTP 429/500/503, connection errors, and timeouts. Managed internally by litellm with exponential backoff. Transport errors (`litellm.exceptions.APIError`) are re-raised immediately since litellm has already exhausted its retries.
+  - **Validation retries** (`validation_retries`): Outer loop retries when the LLM returns JSON that fails Pydantic `model_validate_json()`. Rare with `json_schema` structured output but kept as a safety net.
 - Parses response via `output_schema.model_validate_json()`
 
 > **Spec deviation — direct mode handling**: For non-`LLMFieldsResult` schemas (direct mode or custom schemas), the code stores each list item as a JSON-serialized `FieldResult` with key `item_{i}` (line 262). The spec describes direct mode returning a serialized Pydantic model dict. The code path is functional but rudimentary.
@@ -189,7 +191,7 @@ Lookup functions `get_schema(name)` and `get_retriever(name)` raise `SchemaNotFo
 
 **`batch_pages_with_overlap(pages, batch_size, overlap_factor)`**: Divides pages into overlapping batches with configurable size and overlap.
 
-**`run_llm_split_classify(context, prompt_config, batch_num, total_batches)`**: Sends a page batch to the LLM with `{context}`, `{batch_num}`, `{total_batches}` template variables. Uses `LLMSplitClassifyBatchResult` as structured output.
+**`run_llm_split_classify(context, prompt_config, batch_num, total_batches)`**: Sends a page batch to the LLM with `{context}`, `{batch_num}`, `{total_batches}` template variables. Uses `LLMSplitClassifyBatchResult` as structured output. Uses the same two-level retry strategy as `_call_llm()` (transport retries via `transport_retries`, validation retries via `validation_retries` loop).
 
 **`combine_overlapping_results(batch_results, batches)`**: Merges overlapping batch results. For pages classified in multiple batches, prefers the classification from the batch where the page is more centrally positioned (not at the boundary). Produces contiguous `SplitSegment` list.
 

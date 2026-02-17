@@ -134,19 +134,20 @@ Document management subcommands.
 mydocs docs list                    # List all documents
     --status new|parsed|failed      # Filter by status
     --tags tag1,tag2                # Filter by tags
-    --output json|table|quiet       # Output format (default: table)
 
 mydocs docs show <doc_id>           # Show document details
-    --output json|table|full        # Output format (default: table)
 
 mydocs docs pages <doc_id>          # List pages of a document
-    --output json|table|quiet       # Output format (default: table)
+    --page N                        # Show a single page by number
 
 mydocs docs tag <doc_id> <tags>     # Add tags to a document
     --remove                        # Remove tags instead of adding
 
 mydocs docs delete <doc_id>         # Delete a document and its pages
     --force                         # Skip confirmation prompt
+
+# Shared across all docs subcommands:
+    --output json|table|quiet|full  # Output format (default: table)
 ```
 
 ### 4.5 `mydocs config`
@@ -154,7 +155,7 @@ mydocs docs delete <doc_id>         # Delete a document and its pages
 Configuration utilities.
 
 ```
-mydocs config show                  # Show current parser configuration
+mydocs config show                  # Show current parser configuration (YAML by default, JSON with --output json)
 mydocs config validate              # Validate configuration files
 mydocs config env                   # Show environment variable values (redacted secrets)
 ```
@@ -176,6 +177,8 @@ Extract fields from documents in a case using LLM-based extraction.
 mydocs extract run <case_id>            # Extract fields for all documents in a case
     --document-type generic             # Document type (default: generic)
     --fields field1,field2              # Comma-separated field names (default: all)
+    --content-mode markdown|html        # Content mode (default: markdown)
+    --reference-granularity full|page|none  # Reference granularity (default: none)
     --output json|table|quiet           # Output format (default: table)
 
 mydocs extract results <case_id>        # Show stored extraction results for a case
@@ -197,19 +200,15 @@ Case management subcommands.
 ```
 mydocs cases list                       # List all cases
     --search <term>                     # Search cases by name
-    --output json|table|quiet           # Output format (default: table)
 
 mydocs cases show <case_id>             # Show case details
-    --output json|table                 # Output format (default: table)
 
 mydocs cases create <name>              # Create a new case
     --description "text"                # Optional description
-    --output json|table                 # Output format (default: table)
 
 mydocs cases update <case_id>           # Update a case
     --name "new name"                   # New case name
     --description "new desc"            # New case description
-    --output json|table                 # Output format (default: table)
 
 mydocs cases delete <case_id>           # Delete a case
     --force                             # Skip confirmation prompt
@@ -220,6 +219,8 @@ mydocs cases add-docs <case_id> <ids>   # Add documents to a case
 mydocs cases remove-doc <case_id> <id>  # Remove a document from a case
 
 mydocs cases docs <case_id>             # List documents in a case
+
+# Shared across all cases subcommands:
     --output json|table|quiet           # Output format (default: table)
 ```
 
@@ -259,9 +260,9 @@ Available on all subcommands:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--verbose` / `-v` | `False` | Enable verbose logging (sets `LOG_LEVEL=DEBUG`) |
-| `--config-root` | `./config` | Path to configuration directory |
-| `--data-folder` | `./data` | Path to data directory |
-| `--env-file` | `.env` | Path to environment file |
+| `--config-root` | From `CONFIG_ROOT` env var or `<project_root>/config` | Path to configuration directory |
+| `--data-folder` | From `DATA_FOLDER` env var or `<project_root>/data` | Path to data directory |
+| `--env-file` | `None` (uses existing env) | Path to environment file (loaded with `dotenv`) |
 
 ---
 

@@ -80,7 +80,10 @@ async def run_llm_split_classify(
 ) -> LLMSplitClassifyBatchResult:
     """Run the LLM to classify pages in a single batch.
 
-    Uses litellm with structured output.
+    Uses litellm with structured output and a two-level retry strategy:
+    - Transport retries (transport_retries): Handled by litellm internally.
+    - Validation retries (validation_retries): Outer loop retries on schema
+      validation failures.
     """
     sys_prompt = prompt_config.sys_prompt_template
     user_prompt = prompt_config.user_prompt_template.format(
@@ -94,15 +97,31 @@ async def run_llm_split_classify(
         {"role": "user", "content": user_prompt},
     ]
 
-    response = await litellm.acompletion(
-        model=prompt_config.model,
-        messages=messages,
-        response_format=LLMSplitClassifyBatchResult,
-        **prompt_config.llm_kwargs,
-    )
+    last_error = None
+    for attempt in range(prompt_config.validation_retries):
+        try:
+            response = await litellm.acompletion(
+                model=prompt_config.model,
+                messages=messages,
+                response_format=LLMSplitClassifyBatchResult,
+                num_retries=prompt_config.transport_retries,
+                **prompt_config.llm_kwargs,
+            )
 
-    content = response.choices[0].message.content
-    return LLMSplitClassifyBatchResult.model_validate_json(content)
+            content = response.choices[0].message.content
+            return LLMSplitClassifyBatchResult.model_validate_json(content)
+
+        except litellm.exceptions.APIError:
+            raise  # Transport errors already retried by litellm; don't retry again
+
+        except Exception as e:
+            last_error = e
+            log.warning(
+                f"Validation attempt {attempt + 1}/{prompt_config.validation_retries} "
+                f"failed: {e}"
+            )
+
+    raise last_error
 
 
 # ---------------------------------------------------------------------------
