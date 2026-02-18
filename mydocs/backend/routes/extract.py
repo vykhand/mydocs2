@@ -14,7 +14,6 @@ from mydocs.extracting.models import (
 from mydocs.extracting.prompt_utils import (
     get_prompt,
     get_split_classify_prompt,
-    load_case_type_config,
 )
 from mydocs.extracting.splitter import split_and_classify
 
@@ -67,18 +66,9 @@ async def split_classify(request: SplitClassifyRequest):
     try:
         case_type = request.case_type
 
-        # Load case type config to check if split_classify is enabled
-        case_config = load_case_type_config(case_type)
-        if not case_config.split_classify.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Split-classify is not enabled for case_type '{case_type}'"
-            )
-
-        # Load the split-classify prompt
-        prompt_config = get_split_classify_prompt(
-            case_type, case_config.split_classify.prompt_name
-        )
+        # Load the split-classify prompt directly — if it doesn't exist,
+        # ConfigNotFoundError is raised naturally
+        prompt_config = get_split_classify_prompt(case_type)
 
         result = await split_and_classify(
             document_id=request.document_ids[0],

@@ -183,6 +183,11 @@ mydocs extract run <case_id>            # Extract fields for all documents in a 
 
 mydocs extract results <case_id>        # Show stored extraction results for a case
     --output json|table|quiet           # Output format (default: table)
+
+mydocs extract split-classify <document_id>  # Split and classify a multi-document file
+    --case-type generic                 # Case type (default: generic)
+    --content-mode markdown|html        # Content mode (default: markdown)
+    --output json|table|quiet           # Output format (default: table)
 ```
 
 **Examples**:
@@ -191,6 +196,8 @@ mydocs extract run abc123
 mydocs extract run abc123 --document-type generic --fields summary
 mydocs extract results abc123
 mydocs extract results abc123 --output json
+mydocs extract split-classify doc123
+mydocs extract split-classify doc123 --case-type insurance --output json
 ```
 
 ### 4.8 `mydocs sync`

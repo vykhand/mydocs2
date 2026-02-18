@@ -156,29 +156,6 @@ class LLMSplitClassifyBatchResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Case Type Configuration
-# ---------------------------------------------------------------------------
-
-class DocumentTypeConfig(BaseModel):
-    """Configuration for a document type within a case type."""
-    name: str
-    description: Optional[str] = None
-    target_object: Optional[str] = None
-
-class SplitClassifyConfig(BaseModel):
-    """Split/classify enablement for a case type."""
-    enabled: bool = False
-    prompt_name: str = "main"
-
-class CaseTypeConfig(BaseModel):
-    """Top-level configuration for a case type."""
-    name: str
-    description: Optional[str] = None
-    split_classify: SplitClassifyConfig = Field(default_factory=SplitClassifyConfig)
-    document_types: list[DocumentTypeConfig] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
 # Request / Response (HTTP API)
 # ---------------------------------------------------------------------------
 

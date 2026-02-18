@@ -40,9 +40,9 @@ Extraction models are in `mydocs/extracting/models.py`.
 | D2 | Extra endpoint | `POST /api/v1/documents/upload` — Multipart file upload. Not in spec. |
 | D3 | Extra endpoint | `GET /api/v1/documents/{document_id}/file` — Serve the raw file. Not in spec. |
 | D4 | Extra endpoint | `DELETE /api/v1/documents/{document_id}` — Delete document, its pages, and managed file. Not in spec. |
-| D5 | Extra endpoint | `POST /api/v1/extract` — LLM-based field extraction. Not in backend spec (defined in extracting-engine spec). |
-| D6 | Extra endpoint | `GET /api/v1/field-results` — Fetch stored extraction results. Not in backend spec. |
-| D7 | Extra endpoint | `POST /api/v1/split-classify` — Split/classify multi-document files. Not in backend spec. |
+| D5 | ~~Resolved~~ | `POST /api/v1/extract` — Now specified in backend spec Section 3.12. |
+| D6 | ~~Resolved~~ | `GET /api/v1/field-results` — Now specified in backend spec Section 3.13. |
+| D7 | ~~Resolved~~ | `POST /api/v1/split-classify` — Now specified in backend spec Section 3.14. |
 | D8 | Extra endpoint | `GET /health` — Health check. Not in spec. |
 | D9 | Schema change | `IngestRequest.source` accepts `str \| list[str]` in code; spec shows only `str`. |
 | D10 | Extra error code | `CASE_NOT_FOUND` — used by case endpoints; not in spec error codes table. |
@@ -608,9 +608,9 @@ GET http://localhost:8000/api/v1/cases/{{case_id}}/documents?page=1&page_size=10
 
 ---
 
-### Extraction **[DEVIATION D5, D6, D7]**
+### Extraction
 
-These endpoints are not in the backend spec. They are defined in the extracting-engine spec.
+Extraction endpoints for field extraction, stored results, and split-classify.
 
 #### `POST /api/v1/extract`
 
@@ -878,6 +878,6 @@ mydocs/
       documents.py              # Ingest, upload, parse, get, tags, delete endpoints
       search.py                 # Search and index listing endpoints
       cases.py                  # Case CRUD and document assignment endpoints
-      extract.py                # Extraction, field-results, split-classify endpoints  [DEVIATION D5-D7]
+      extract.py                # Extraction, field-results, split-classify endpoints
       sync.py                   # Sync plan, execute, write-sidecars endpoints
 ```

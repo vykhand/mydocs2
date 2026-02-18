@@ -33,8 +33,6 @@ The engine operates on `Document` and `DocumentPage` models from [parsing-engine
 | **Reference Granularity** | Controls how much source-location detail is returned: `full`, `page`, or `none`. |
 | **SubDocument** | A classified segment within a parent `Document`, created by the split/classify step. Contains page references, a `case_type`, and a `document_type`. Embedded on the `Document` model. |
 | **Target Object** | A domain-specific MongoDB model (e.g., `InsuranceInvoice`) populated from extraction results. Registered via the target object registry as a `(case_type, document_type)` → `MongoBaseModel` mapping. |
-| **Case Type Config** | YAML configuration for a case type (`config/extracting/{case_type}/case_type.yaml`). Defines available document types, split/classify enablement, and prompt locations. |
-
 > **Note — Case model change**: The `Case` model (from `mydocs/models.py`) requires a new `type` field:
 >
 > ```python
@@ -312,30 +310,6 @@ class Document(MongoBaseModel):
     subdocuments: Optional[List[SubDocument]] = None
 ```
 
-### 2.8 Case Type Configuration
-
-Defines the document types and split/classify settings for a case type. Loaded from `config/extracting/{case_type}/case_type.yaml`.
-
-```python
-class DocumentTypeConfig(BaseModel):
-    """Configuration for a document type within a case type."""
-    name: str                                    # e.g., "invoice"
-    description: Optional[str] = None
-    target_object: Optional[str] = None          # Registry key for target object class
-
-class SplitClassifyConfig(BaseModel):
-    """Split/classify enablement for a case type."""
-    enabled: bool = False
-    prompt_name: str = "main"                    # Prompt file name in split_classify/prompts/
-
-class CaseTypeConfig(BaseModel):
-    """Top-level configuration for a case type."""
-    name: str                                    # e.g., "insurance"
-    description: Optional[str] = None
-    split_classify: SplitClassifyConfig = SplitClassifyConfig()
-    document_types: list[DocumentTypeConfig] = []
-```
-
 ---
 
 ## 3. Document Classification & Splitting
@@ -368,7 +342,7 @@ Splitting uses a batched approach for large documents:
 3. **Merge results**: Combine batch results, resolving overlaps by preferring the batch where the boundary is more clearly visible
 4. **Persist sub-documents**: Resolve page numbers to page IDs, build `SubDocumentPageRef` and `SubDocument` objects with deterministic IDs (via `generate_composite_id`), and save them as embedded objects on the parent `Document`
 
-Split/classify is enabled per case type via `CaseTypeConfig.split_classify.enabled`. When enabled, the split/classify prompt is loaded from `config/extracting/{case_type}/split_classify/prompts/{prompt_name}.yaml`.
+Split/classify is triggered directly by calling the split-classify endpoint or CLI command with a `case_type`. The split/classify prompt is loaded from `config/extracting/{case_type}/split_classify/prompts/{prompt_name}.yaml`. If no prompt exists, a `ConfigNotFoundError` is raised.
 
 ### 3.3 Split/Classify Prompt Config
 
@@ -819,7 +793,6 @@ config/
   parser.yml
   extracting/
     {case_type}/                              # e.g., generic/, insurance_claim/
-      case_type.yaml                          # CaseTypeConfig — defines document types, split_classify settings
       {document_type}/                        # e.g., claim/, policy/, invoice/
         fields/
           {document_type}.yaml
@@ -831,7 +804,7 @@ config/
         prompt_manifest.yaml
       split_classify/                         # Case-type level (not document-type)
         prompts/
-          {name}.yaml                         # Split/classify prompt config (prompt_name from SplitClassifyConfig)
+          {name}.yaml                         # Split/classify prompt config
 ```
 
 All directory names are lowercase. Case types and document types can be any value in the database, but are always lowercased for config paths and filesystem directories.
@@ -1101,14 +1074,14 @@ Field definitions and prompt configs support versioning via content hashing:
 mydocs/
   extracting/
     __init__.py                 # Imports retrievers and case_types to trigger registration
-    models.py                   # FieldDefinition, FieldResult, LLMFieldItem, CaseTypeConfig, etc.
+    models.py                   # FieldDefinition, FieldResult, LLMFieldItem, etc.
     config.py                   # ExtractingConfig (YAML loading)
     extractor.py                # BaseExtractor with graph-based pipeline
     retrievers.py               # Vector, fulltext, pages retriever factories
     registry.py                 # Schema, retriever, and target object registries
     enrichment.py               # Reference resolution, polygon calculation
     splitter.py                 # Document split/classify logic
-    prompt_utils.py             # Prompt, field, and case_type config loading
+    prompt_utils.py             # Prompt and field config loading
     target_objects.py           # Type coercion and target object population
     schemas/                    # Custom output schemas
       __init__.py
@@ -1122,7 +1095,6 @@ mydocs/
 config/
   extracting/
     {case_type}/
-      case_type.yaml            # CaseTypeConfig
       {document_type}/
         fields/
         prompts/

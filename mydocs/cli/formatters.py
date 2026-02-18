@@ -371,6 +371,30 @@ def format_sync_report(report, mode: str) -> None:
         print(f"Duration: {elapsed:.1f}s")
 
 
+def format_split_classify_result(result, mode: str) -> None:
+    """Format and print a split-classify result."""
+    if mode == "json":
+        print(result.model_dump_json(indent=2))
+    elif mode == "quiet":
+        n_segments = len(result.segments) if result.segments else 0
+        n_subdocs = len(result.subdocuments) if result.subdocuments else 0
+        print(f"{n_segments} segments, {n_subdocs} subdocuments")
+    else:
+        # table
+        if not result.segments:
+            print("No segments found.")
+            return
+        headers = ["DocType", "Pages", "SubDocID"]
+        rows = []
+        for i, seg in enumerate(result.segments):
+            pages = ",".join(str(p) for p in seg.page_numbers)
+            subdoc_id = ""
+            if result.subdocuments and i < len(result.subdocuments):
+                subdoc_id = result.subdocuments[i].id
+            rows.append([seg.document_type, pages, subdoc_id])
+        print_table(headers, rows)
+
+
 def format_config(serialized_config, mode: str) -> None:
     """Format and print configuration."""
     if mode == "json":

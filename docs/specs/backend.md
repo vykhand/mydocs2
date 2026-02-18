@@ -352,13 +352,51 @@ DELETE /api/v1/documents/{document_id}
 Response: 204 No Content
 ```
 
-### 3.12 Cases
+### 3.12 Extract Fields
+
+```
+POST /api/v1/extract
+Body: ExtractionRequest (see extracting-engine.md Section 2.5)
+Response: ExtractionResponse (see extracting-engine.md Section 2.6)
+```
+
+### 3.13 Get Field Results
+
+```
+GET /api/v1/field-results?document_id={document_id}
+Response: list[FieldResultRecord]
+```
+
+### 3.14 Split and Classify
+
+Split a multi-document file into typed segments using LLM classification. Requires exactly one `document_id`.
+
+```
+POST /api/v1/split-classify
+Body: {
+    "document_type": "generic",
+    "document_ids": ["document_id"],
+    "case_type": "generic",
+    "content_mode": "markdown"
+}
+Response: {
+    "segments": [
+        { "document_type": "invoice", "page_numbers": [1, 2, 3] },
+        { "document_type": "receipt", "page_numbers": [4, 5] }
+    ],
+    "subdocuments": [...]
+}
+```
+
+The split-classify prompt is loaded from `config/extracting/{case_type}/split_classify/prompts/main.yaml`. If no prompt exists for the given `case_type`, a `ConfigNotFoundError` (500) is returned.
+
+### 3.15 Cases
 
 Cases group related documents for review or investigation. The `Case` model is defined in `mydocs/models.py`.
 
 The `Case` model includes a `type` field (string, default `"generic"`) for categorizing cases.
 
-#### 3.12.1 List Cases
+#### 3.15.1 List Cases
 ```
 GET /api/v1/cases?page=1&page_size=25&search=term
 Response: {
@@ -369,46 +407,46 @@ Response: {
 }
 ```
 
-#### 3.9.2 Create Case
+#### 3.15.2 Create Case
 ```
 POST /api/v1/cases
 Body: { "name": "Case Name", "description": "Optional description" }
 Response: { ... full case model ... }
 ```
 
-#### 3.9.3 Get Case
+#### 3.15.3 Get Case
 ```
 GET /api/v1/cases/{case_id}
 Response: { ... full case model ... }
 ```
 
-#### 3.9.4 Update Case
+#### 3.15.4 Update Case
 ```
 PUT /api/v1/cases/{case_id}
 Body: { "name": "Updated Name", "description": "Updated description" }
 Response: { ... full case model ... }
 ```
 
-#### 3.9.5 Delete Case
+#### 3.15.5 Delete Case
 ```
 DELETE /api/v1/cases/{case_id}
 Response: 204 No Content
 ```
 
-#### 3.9.6 Add Documents to Case
+#### 3.15.6 Add Documents to Case
 ```
 POST /api/v1/cases/{case_id}/documents
 Body: { "document_ids": ["doc_id_1", "doc_id_2"] }
 Response: { ... full case model ... }
 ```
 
-#### 3.9.7 Remove Document from Case
+#### 3.15.7 Remove Document from Case
 ```
 DELETE /api/v1/cases/{case_id}/documents/{document_id}
 Response: { ... full case model ... }
 ```
 
-#### 3.9.8 List Documents in Case
+#### 3.15.8 List Documents in Case
 ```
 GET /api/v1/cases/{case_id}/documents?page=1&page_size=25
 Response: {
@@ -419,11 +457,11 @@ Response: {
 }
 ```
 
-### 3.13 Sync
+### 3.16 Sync
 
 Storage-to-DB synchronization endpoints. See [sync.md](sync.md) for the full sync specification.
 
-#### 3.13.1 Build Sync Plan
+#### 3.16.1 Build Sync Plan
 ```
 POST /api/v1/sync/plan
 Body: {
@@ -433,7 +471,7 @@ Body: {
 Response: { ... SyncPlan model ... }
 ```
 
-#### 3.13.2 Execute Sync
+#### 3.16.2 Execute Sync
 ```
 POST /api/v1/sync/execute
 Body: {
@@ -445,7 +483,7 @@ Body: {
 Response: { ... SyncReport model ... }
 ```
 
-#### 3.13.3 Write Sidecars
+#### 3.16.3 Write Sidecars
 ```
 POST /api/v1/sync/write-sidecars
 Body: {
@@ -523,6 +561,7 @@ mydocs/
       documents.py              # Ingest, parse, get, tags endpoints
       search.py                 # Search and index listing endpoints
       cases.py                  # Case CRUD and document assignment endpoints
+      extract.py                # Extraction, field-results, split-classify endpoints
       sync.py                   # Sync plan, execute, write-sidecars endpoints
     dependencies.py             # FastAPI dependency injection
 ```

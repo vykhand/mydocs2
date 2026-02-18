@@ -1,10 +1,16 @@
-"""mydocs extract command — run extraction and view results."""
+"""mydocs extract command — run extraction, view results, split-classify."""
 
 import sys
 
-from mydocs.cli.formatters import format_extraction_result, format_field_results
+from mydocs.cli.formatters import (
+    format_extraction_result,
+    format_field_results,
+    format_split_classify_result,
+)
 from mydocs.extracting.extractor import BaseExtractor
 from mydocs.extracting.models import ExtractionRequest, FieldResultRecord
+from mydocs.extracting.prompt_utils import get_split_classify_prompt
+from mydocs.extracting.splitter import split_and_classify
 from mydocs.models import Case, Document
 
 
@@ -25,6 +31,12 @@ def register(subparsers):
     results_parser = sub.add_parser("results", help="Show extraction results for a case")
     results_parser.add_argument("case_id", help="Case ID")
 
+    # extract split-classify <document_id>
+    sc_parser = sub.add_parser("split-classify", help="Split and classify a multi-document file")
+    sc_parser.add_argument("document_id", help="Document ID")
+    sc_parser.add_argument("--case-type", default="generic", help="Case type (default: generic)")
+    sc_parser.add_argument("--content-mode", choices=["markdown", "html"], default="markdown", help="Content mode (default: markdown)")
+
     parser.add_argument(
         "--output",
         choices=["json", "table", "quiet"],
@@ -42,8 +54,10 @@ async def handle(args):
         await _handle_run(args, output)
     elif action == "results":
         await _handle_results(args, output)
+    elif action == "split-classify":
+        await _handle_split_classify(args, output)
     else:
-        print("Error: specify a subcommand: run or results", file=sys.stderr)
+        print("Error: specify a subcommand: run, results, or split-classify", file=sys.stderr)
         sys.exit(2)
 
 
@@ -105,3 +119,26 @@ async def _handle_results(args, output):
             format_field_results(records, output)
         else:
             print(f"\n--- {doc_name} --- (no results)")
+
+
+async def _handle_split_classify(args, output):
+    document_id = args.document_id
+    case_type = getattr(args, "case_type", "generic")
+    content_mode = getattr(args, "content_mode", "markdown")
+
+    doc = await Document.aget(document_id)
+    if not doc:
+        raise ValueError(f"Document {document_id} not found")
+
+    doc_name = doc.original_file_name or document_id
+    print(f"Split-classifying: {doc_name}", file=sys.stderr)
+
+    prompt_config = get_split_classify_prompt(case_type)
+
+    result = await split_and_classify(
+        document_id=document_id,
+        prompt_config=prompt_config,
+        content_mode=content_mode,
+        case_type=case_type,
+    )
+    format_split_classify_result(result, output)

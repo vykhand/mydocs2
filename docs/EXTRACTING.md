@@ -7,7 +7,6 @@ The extracting engine performs LLM-based information extraction from parsed docu
 
 Key features:
 - **SubDocuments**: Split/classify persists classified segments as `SubDocument` objects on the parent `Document`
-- **Case Type Config**: Per-case-type configuration via `case_type.yaml` (split/classify enablement, document types)
 - **Target Object Registry**: `(case_type, document_type)` → `MongoBaseModel` mapping for domain-specific extraction targets
 - **Subdocument Scoping**: Extraction can be scoped to a specific subdocument, overriding document_type and page_ids
 - **Type Coercion**: Target object fields are automatically coerced from `FieldResult` to plain types (`str`, `int`, etc.)
@@ -65,7 +64,6 @@ All enumerations, field definitions, result models, request/response types, Mong
 | `ExtractionRequest`, `ExtractionResponse` | Implemented with `subdocument_id` and `target_object_id` fields |
 | `FieldResultRecord`, `UserFieldDefinition` | Implemented with `subdocument_id` and `case_type` on `FieldResultRecord`. Composite key: `[document_id, subdocument_id, field_name]` |
 | `RetrieverConfig`, `PromptConfig` | Implemented as specified |
-| `DocumentTypeConfig`, `SplitClassifyConfig`, `CaseTypeConfig` | **New** — case type configuration models for split/classify enablement and document type definitions |
 | `FieldPrompt`, `FieldInput`, `PromptInput` | **Code-only** — pipeline-internal models not described in the spec |
 | `RetrieverFilter` | Implemented as specified |
 | `SubgraphOutput`, `ExtractGroupState`, `ExtractorState` | **Code-only** — LangGraph state models. `ExtractorState` includes `subdocument_id` |
@@ -187,8 +185,6 @@ Lookup functions: `get_schema(name)`, `get_retriever(name)`, `get_target_object_
 
 **Config path resolution**: `_get_config_dir(case_type, document_type)` resolves to `config/extracting/{case_type}/{document_type}/`, falling back to `config/extracting/generic/{document_type}/` if the primary path doesn't exist.
 
-**`load_case_type_config(case_type)`**: Loads `CaseTypeConfig` from `config/extracting/{case_type}/case_type.yaml`. Returns a default `CaseTypeConfig` if the file does not exist.
-
 **`get_split_classify_prompt(case_type, prompt_name)`**: Loads the split-classify `PromptConfig` from `config/extracting/{case_type}/split_classify/prompts/{prompt_name}.yaml`. Falls back to generic if not found for the given case type.
 
 **`get_all_fields(case_type, document_type)`**: Loads all YAML files from the `fields/` subdirectory. Supports two YAML formats: a top-level list of field dicts, or a dict with a `fields` key.
@@ -275,16 +271,14 @@ Empty `__init__.py`. No custom schemas are registered. The spec describes exampl
 config/
   extracting/
     generic/
-      case_type.yaml           # CaseTypeConfig (split_classify.enabled: false)
       generic/
         fields/
           main.yaml            # Default field definitions
         prompts/
           main.yaml            # Default prompt config
-      split_classify/          # Placeholder (disabled for generic)
+      split_classify/
         prompts/
     {other_case_type}/         # Future case types follow same pattern
-      case_type.yaml
       split_classify/
         prompts/
           main.yaml            # Split-classify prompt config
@@ -293,7 +287,7 @@ config/
         prompts/
 ```
 
-The `case_type.yaml` defines per-case-type settings including split/classify enablement and document type list. The split-classify endpoint checks `case_type.yaml` before proceeding.
+Split-classify is triggered directly — if a prompt exists at `config/extracting/{case_type}/split_classify/prompts/main.yaml`, it works. If not, `ConfigNotFoundError` is raised.
 
 ### Default Field (`config/extracting/generic/generic/fields/main.yaml`)
 
