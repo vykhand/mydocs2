@@ -8,7 +8,7 @@
 
 ## Current State
 
-The backend is a FastAPI application (`mydocs/backend/app.py`) exposing four route modules:
+The backend is a FastAPI application (`mydocs/backend/app.py`) exposing five route modules:
 
 | Module | Prefix | File |
 |--------|--------|------|
@@ -16,6 +16,7 @@ The backend is a FastAPI application (`mydocs/backend/app.py`) exposing four rou
 | Search | `/api/v1/search` | `routes/search.py` |
 | Cases | `/api/v1/cases` | `routes/cases.py` |
 | Extraction | `/api/v1` | `routes/extract.py` |
+| Sync | `/api/v1/sync` | `routes/sync.py` |
 
 Request/response Pydantic models are in `mydocs/backend/dependencies.py`.
 Search models are in `mydocs/retrieval/models.py`.
@@ -705,6 +706,139 @@ Content-Type: application/json
 
 ---
 
+### Sync
+
+Storage-to-DB synchronization endpoints. See [sync spec](specs/sync.md) for the full algorithm.
+
+Sync request/response models are defined inline in `mydocs/backend/routes/sync.py`.
+Core sync logic is in `mydocs/sync/` (scanner, reconciler, sidecar).
+
+#### `POST /api/v1/sync/plan`
+
+Build a sync plan by scanning managed storage and comparing with the database.
+
+**Request body**:
+```json
+{
+    "scan_path": "data/managed/",
+    "verify_content": false
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `scan_path` | string | `null` | Override managed storage path (default: `DATA_FOLDER/managed/`) |
+| `verify_content` | bool | `false` | Verify file content via SHA256 comparison |
+
+```http
+POST http://localhost:8000/api/v1/sync/plan
+Content-Type: application/json
+
+{}
+```
+
+**Response** `200`:
+```json
+{
+    "items": [
+        {
+            "file_path": "/path/to/managed/abc123.pdf",
+            "doc_id": "abc123",
+            "action": "restore",
+            "reason": "File and sidecar on disk, no DB record",
+            "sidecar_path": "/path/to/managed/abc123.metadata.json"
+        }
+    ],
+    "summary": { "restore": 2, "verified": 3 },
+    "scan_path": "data/managed/",
+    "scanned_at": "2026-02-18T17:00:00"
+}
+```
+
+Actions: `restore`, `reparse`, `orphaned_db`, `verified`, `sidecar_missing`.
+
+---
+
+#### `POST /api/v1/sync/execute`
+
+Execute a sync plan (scan + execute in one call).
+
+**Request body**:
+```json
+{
+    "scan_path": "data/managed/",
+    "verify_content": false,
+    "reparse": false,
+    "actions": ["restore", "sidecar_missing"]
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `scan_path` | string | `null` | Override managed storage path |
+| `verify_content` | bool | `false` | Verify file content via SHA256 |
+| `reparse` | bool | `false` | Re-parse restored documents from `.di.json` cache |
+| `actions` | list[str] | `null` | Filter to specific action types (default: all) |
+
+```http
+POST http://localhost:8000/api/v1/sync/execute
+Content-Type: application/json
+
+{
+    "reparse": true
+}
+```
+
+**Response** `200`:
+```json
+{
+    "items": [
+        {
+            "item": { "doc_id": "abc123", "action": "restore", ... },
+            "success": true,
+            "error": null
+        }
+    ],
+    "summary": { "restore": { "success": 2, "failed": 0 } },
+    "started_at": "2026-02-18T17:00:00",
+    "completed_at": "2026-02-18T17:00:12"
+}
+```
+
+---
+
+#### `POST /api/v1/sync/write-sidecars`
+
+Write missing metadata sidecars for managed files that have DB records but no sidecar on disk.
+
+**Request body**:
+```json
+{
+    "scan_path": "data/managed/"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `scan_path` | string | `null` | Override managed storage path |
+
+```http
+POST http://localhost:8000/api/v1/sync/write-sidecars
+Content-Type: application/json
+
+{}
+```
+
+**Response** `200`:
+```json
+{
+    "written": 5,
+    "skipped": 0
+}
+```
+
+---
+
 ## Error Handling
 
 All errors use a consistent JSON format:
@@ -727,7 +861,7 @@ All errors use a consistent JSON format:
 | 422 | `VALIDATION_ERROR` | Request validation failed |
 | 500 | `INTERNAL_ERROR` | Unexpected server error |
 
-Note: Extraction endpoints (`/extract`, `/field-results`, `/split-classify`) use FastAPI's `HTTPException` directly, returning `{"detail": "..."}` without `error_code`/`status_code` fields.
+Note: Extraction endpoints (`/extract`, `/field-results`, `/split-classify`) and sync endpoints use FastAPI's `HTTPException` directly, returning `{"detail": "..."}` without `error_code`/`status_code` fields.
 
 ---
 
@@ -745,4 +879,5 @@ mydocs/
       search.py                 # Search and index listing endpoints
       cases.py                  # Case CRUD and document assignment endpoints
       extract.py                # Extraction, field-results, split-classify endpoints  [DEVIATION D5-D7]
+      sync.py                   # Sync plan, execute, write-sidecars endpoints
 ```

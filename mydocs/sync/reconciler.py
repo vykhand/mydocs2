@@ -45,8 +45,8 @@ async def _restore_from_sidecar(
     await doc.asave()
     log.info(f"Restored document {doc.id} from sidecar ({sidecar.original_file_name})")
 
-    # If the document was previously parsed and we want to reparse from cache
-    if reparse and sidecar.status == DocumentStatusEnum.PARSED:
+    # If reparse requested, try to re-parse from .di.json cache
+    if reparse:
         try:
             doc.status = DocumentStatusEnum.NEW
             await doc.asave()

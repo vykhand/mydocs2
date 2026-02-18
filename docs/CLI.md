@@ -466,6 +466,92 @@ The `--output` flag is defined at the parent `extract` parser level, shared by b
 
 ---
 
+### `mydocs sync`
+
+Storage-to-DB synchronization. Scans managed storage and compares with database state to rebuild lost records. See [sync spec](specs/sync.md) for the full algorithm.
+
+#### `mydocs sync status`
+
+Scan managed storage and database, display a sync plan without executing.
+
+```
+mydocs sync status
+    --scan-path PATH                    # Override managed storage path (default: data/managed/)
+    --verify-content                    # Verify file content via SHA256 (slower)
+    --output json|table|quiet           # Output format (default: table)
+```
+
+**Examples**:
+
+```bash
+# Show sync status (what would need to be done)
+mydocs sync status
+
+# Verify content integrity via SHA256
+mydocs sync status --verify-content
+
+# JSON output for scripting
+mydocs sync --output json status
+```
+
+#### `mydocs sync run`
+
+Execute a sync plan — restore documents from sidecars, write missing sidecars, flag orphans.
+
+```
+mydocs sync run
+    --scan-path PATH                    # Override managed storage path
+    --verify-content                    # Verify file content via SHA256
+    --reparse                           # Re-parse restored documents from .di.json cache
+    --actions restore,sidecar_missing   # Comma-separated actions to execute (default: all)
+    --dry-run                           # Show plan without executing
+    --output json|table|quiet           # Output format (default: table)
+```
+
+Actions: `restore`, `reparse`, `orphaned_db`, `verified`, `sidecar_missing`.
+
+**Examples**:
+
+```bash
+# Full sync (restore + write sidecars + flag orphans)
+mydocs sync run
+
+# Restore documents and re-parse from cache
+mydocs sync run --reparse
+
+# Only restore, skip other actions
+mydocs sync run --actions restore
+
+# Dry run — show what would happen
+mydocs sync run --dry-run
+
+# JSON output
+mydocs sync --output json run --reparse
+```
+
+#### `mydocs sync write-sidecars`
+
+Write missing metadata sidecars for managed files that have DB records but no sidecar on disk.
+
+```
+mydocs sync write-sidecars
+    --scan-path PATH                    # Override managed storage path
+    --output json|table|quiet           # Output format (default: table)
+```
+
+**Examples**:
+
+```bash
+# Write sidecars for all managed files missing them
+mydocs sync write-sidecars
+```
+
+The `--output` flag is defined at the parent `sync` parser level with choices `json|table|quiet`, shared by all subcommands.
+
+**Implementation notes**: All sync subcommands call `build_sync_plan()` from `mydocs.sync.scanner` first, then `execute_sync_plan()` from `mydocs.sync.reconciler` for execution. The `write-sidecars` command is a shortcut that filters to only `sidecar_missing` actions.
+
+---
+
 ### `mydocs config`
 
 Configuration utilities.
@@ -622,6 +708,7 @@ mydocs/
       docs.py                     # mydocs docs {list,show,pages,tag,delete}
       cases.py                    # mydocs cases {list,show,create,update,delete,add-docs,remove-doc,docs}
       extract.py                  # mydocs extract {run,results}
+      sync.py                     # mydocs sync {status,run,write-sidecars}
       config.py                   # mydocs config {show,validate,env}
       migrate.py                  # mydocs migrate {run,list}
     formatters.py                 # Output formatting (table, json, quiet, full)

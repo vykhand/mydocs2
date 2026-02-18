@@ -4,25 +4,33 @@ import os
 from collections import Counter
 from datetime import datetime
 
-from lightodm import generate_composite_id
 from tinystructlog import get_logger
 
 import mydocs.config as C
 from mydocs.models import Document, MetadataSidecar
+from mydocs.parsing.pipeline import EXTENSION_MAP
 from mydocs.parsing.storage.local import LocalFileStorage
 from mydocs.sync.models import SyncAction, SyncItem, SyncPlan
 
 log = get_logger(__name__)
 
+# Extensions recognized as managed document files (derived from EXTENSION_MAP)
+_MANAGED_EXTENSIONS = set(EXTENSION_MAP.keys())
+
 
 def _doc_id_from_filename(filename: str) -> str | None:
     """Extract doc_id from a managed filename like '<doc_id>.<ext>'.
 
-    Returns None if the file is a sidecar (.metadata.json).
+    Returns None if the file is not a recognized managed document file
+    (e.g., .di.json caches, .gitkeep, embedding caches).
     """
     if filename.endswith(".metadata.json"):
         return None
-    stem, _ = os.path.splitext(filename)
+    if filename.startswith("."):
+        return None
+    stem, ext = os.path.splitext(filename)
+    if ext.lower() not in _MANAGED_EXTENSIONS:
+        return None
     return stem
 
 
