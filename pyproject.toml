@@ -8,6 +8,7 @@ dependencies = [
     "aiofiles>=24.1.0",
     "azure-ai-documentintelligence>=1.0.2",
     "fastapi>=0.115.0",
+    "ipykernel>=7.2.0",
     "langgraph>=0.2.0",
     "lightodm>=0.2.0",
     "litellm>=1.80.0",
