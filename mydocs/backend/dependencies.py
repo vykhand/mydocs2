@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from mydocs.models import StorageModeEnum
+
 
 class ErrorResponse(BaseModel):
     detail: str
@@ -13,7 +15,7 @@ class ErrorResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     source: str | list[str]
-    storage_mode: str = "managed"
+    storage_mode: StorageModeEnum = StorageModeEnum.MANAGED
     tags: list[str] = Field(default_factory=list)
     recursive: bool = True
 

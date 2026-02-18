@@ -68,6 +68,8 @@ The `source` field accepts either a single path (string) or a list of paths.
 
 Upload files via multipart form data. Files are saved to `DATA_FOLDER/uploads/` then ingested.
 
+**Note**: Uploaded files always use **managed** storage mode (the file is copied into managed storage). External mode is only available via the `/ingest` endpoint for path-based ingestion.
+
 ```
 POST /api/v1/documents/upload
 Content-Type: multipart/form-data
@@ -75,7 +77,6 @@ Content-Type: multipart/form-data
 Form fields:
     files:              (required) One or more files
     tags:               (optional) Comma-separated tags, default ""
-    storage_mode:       (optional) "managed" | "external", default "managed"
     parse_after_upload:  (optional) true | false, default false
 
 Response: {
@@ -282,19 +283,59 @@ Response: {
 }
 ```
 
-### 3.6 Get Document
+### 3.6 List Documents
+
+```
+GET /api/v1/documents?page=1&page_size=25
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | `1` | Page number (>= 1) |
+| `page_size` | int | `25` | Results per page (1–100) |
+| `status` | string | `null` | Filter by `DocumentStatusEnum` value |
+| `file_type` | string | `null` | Filter by `FileTypeEnum` value |
+| `document_type` | string | `null` | Filter by `DocumentTypeEnum` value |
+| `tags` | string | `null` | Comma-separated tags (AND logic) |
+| `sort_by` | string | `"created_at"` | Field to sort by |
+| `sort_order` | string | `"desc"` | Sort direction: `"asc"` or `"desc"` |
+| `search` | string | `null` | Substring search on `original_file_name` (case-insensitive) |
+| `date_from` | string | `null` | ISO date string, inclusive lower bound on `created_at` |
+| `date_to` | string | `null` | ISO date string, inclusive upper bound on `created_at` |
+
+```
+Response: {
+    "documents": [{ ... document model ... }],
+    "total": 42,
+    "page": 1,
+    "page_size": 25
+}
+```
+
+### 3.7 Get Document
 ```
 GET /api/v1/documents/{document_id}
 Response: { ... full document model ... }
 ```
 
-### 3.7 Get Pages
+### 3.8 Get Document File
+
+Download the raw file (PDF, image, etc.) as a binary response with the appropriate `Content-Type`.
+
+```
+GET /api/v1/documents/{document_id}/file
+Response: Binary file content
+```
+
+Returns `404 FILE_NOT_FOUND` if the file is not present on disk.
+
+### 3.9 Get Pages
 ```
 GET /api/v1/documents/{document_id}/pages
 GET /api/v1/documents/{document_id}/pages/{page_number}
 ```
 
-### 3.8 Manage Tags
+### 3.10 Manage Tags
 ```
 POST /api/v1/documents/{document_id}/tags
 Body: { "tags": ["new_tag"] }
@@ -302,11 +343,22 @@ Body: { "tags": ["new_tag"] }
 DELETE /api/v1/documents/{document_id}/tags/{tag}
 ```
 
-### 3.9 Cases
+### 3.11 Delete Document
+
+Deletes a document, all its pages, and the managed file (if any) from disk.
+
+```
+DELETE /api/v1/documents/{document_id}
+Response: 204 No Content
+```
+
+### 3.12 Cases
 
 Cases group related documents for review or investigation. The `Case` model is defined in `mydocs/models.py`.
 
-#### 3.9.1 List Cases
+The `Case` model includes a `type` field (string, default `"generic"`) for categorizing cases.
+
+#### 3.12.1 List Cases
 ```
 GET /api/v1/cases?page=1&page_size=25&search=term
 Response: {

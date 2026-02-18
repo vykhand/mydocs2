@@ -18,7 +18,7 @@ from mydocs.backend.dependencies import (
     TagsRequest,
 )
 from mydocs.parsing.base_parser import DocumentLockedException
-from mydocs.models import Document, DocumentPage
+from mydocs.models import Document, DocumentPage, StorageModeEnum
 from mydocs.parsing.pipeline import batch_parse, ingest_files, parse_document
 import mydocs.config as C
 
@@ -103,7 +103,6 @@ async def list_documents(
 async def upload_files(
     files: list[UploadFile] = File(...),
     tags: str = Form(""),
-    storage_mode: str = Form("managed"),
     parse_after_upload: bool = Form(False),
 ):
     upload_dir = os.path.join(C.DATA_FOLDER, "uploads")
@@ -121,7 +120,7 @@ async def upload_files(
 
     documents, skipped = await ingest_files(
         source=saved_paths,
-        storage_mode=storage_mode,
+        storage_mode=StorageModeEnum.MANAGED,
         tags=tag_list,
     )
 
@@ -267,6 +266,14 @@ async def delete_document(document_id: str):
     # Delete managed file if it exists
     if doc.managed_path and os.path.isfile(doc.managed_path):
         os.remove(doc.managed_path)
+
+    # Delete sidecar metadata file for external mode (never delete the original file)
+    if doc.storage_mode == StorageModeEnum.EXTERNAL and doc.original_path:
+        sidecar = os.path.join(
+            os.path.dirname(doc.original_path), f"{doc.id}.metadata.json"
+        )
+        if os.path.isfile(sidecar):
+            os.remove(sidecar)
 
     # Delete document
     await Document.adelete_one({"_id": document_id})

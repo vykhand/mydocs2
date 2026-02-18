@@ -67,7 +67,7 @@ Files can be imported in two modes:
 
 #### 2.3.2 External Mode
 - The file **remains at its original location**
-- Only metadata is stored (as a sidecar JSON file: `<filename>.metadata.json` alongside the original file, and in the database)
+- Only metadata is stored (as a sidecar JSON file: `<doc_id>.metadata.json` alongside the original file, and in the database)
 - The original path/URI is recorded for access
 - Useful for large file repositories where copying is impractical
 
@@ -221,7 +221,8 @@ Since one file = one document in mydocs, these are combined into a single model 
 ```python
 class Document(MongoBaseModel):
     # --- File-level fields ---
-    file_name: str                                      # Original filename
+    file_name: str                                      # Stem of the filename (no extension)
+    original_file_name: str                             # Original filename with extension
     file_type: FileTypeEnum                             # Detected file type
     original_path: str                                  # Original file path/URI
     storage_mode: StorageModeEnum                       # managed or external
