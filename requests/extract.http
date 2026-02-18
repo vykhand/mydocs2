@@ -1,0 +1,75 @@
+### Extract fields from a document
+POST http://localhost:8000/api/v1/extract
+Content-Type: application/json
+
+{
+    "document_type": "invoice",
+    "document_ids": ["{{document_id}}"],
+    "case_type": "generic"
+}
+
+### Extract specific fields only
+POST http://localhost:8000/api/v1/extract
+Content-Type: application/json
+
+{
+    "document_type": "invoice",
+    "document_ids": ["{{document_id}}"],
+    "case_type": "generic",
+    "fields": ["total_amount", "invoice_date"]
+}
+
+### Extract in direct mode (no references)
+POST http://localhost:8000/api/v1/extract
+Content-Type: application/json
+
+{
+    "document_type": "invoice",
+    "document_ids": ["{{document_id}}"],
+    "extraction_mode": "direct",
+    "reference_granularity": "none"
+}
+
+### Extract with page-level references
+POST http://localhost:8000/api/v1/extract
+Content-Type: application/json
+
+{
+    "document_type": "invoice",
+    "document_ids": ["{{document_id}}"],
+    "reference_granularity": "page",
+    "content_mode": "markdown"
+}
+
+### Extract from specific pages
+POST http://localhost:8000/api/v1/extract
+Content-Type: application/json
+
+{
+    "document_type": "invoice",
+    "document_ids": ["{{document_id}}"],
+    "page_ids": ["{{page_id}}"]
+}
+
+### Extract with reference inference
+POST http://localhost:8000/api/v1/extract
+Content-Type: application/json
+
+{
+    "document_type": "invoice",
+    "document_ids": ["{{document_id}}"],
+    "infer_references": true
+}
+
+### Get stored field results for a document
+GET http://localhost:8000/api/v1/field-results?document_id={{document_id}}
+
+### Split and classify a multi-document file
+POST http://localhost:8000/api/v1/split-classify
+Content-Type: application/json
+
+{
+    "document_type": "generic",
+    "document_ids": ["{{document_id}}"],
+    "case_type": "generic"
+}

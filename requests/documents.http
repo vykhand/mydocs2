@@ -33,3 +33,12 @@ GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/1
 
 ### Get page 2
 GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/2
+
+### Search documents by file name
+GET http://localhost:8000/api/v1/documents?search=report
+
+### Download raw file for a document
+GET http://localhost:8000/api/v1/documents/{{document_id}}/file
+
+### Delete a document (removes pages and managed file)
+DELETE http://localhost:8000/api/v1/documents/{{document_id}}

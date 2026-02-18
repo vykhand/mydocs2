@@ -4,7 +4,7 @@
 **Version**: 1.0
 **Status**: Draft
 
-**Related Specs**: [parsing-engine.md](parsing-engine.md) (data models, pipeline), [retrieval-engine.md](retrieval-engine.md) (search), [cli.md](cli.md) (CLI interface)
+**Related Specs**: [parsing-engine.md](parsing-engine.md) (data models, pipeline), [retrieval-engine.md](retrieval-engine.md) (search), [extracting-engine.md](extracting-engine.md) (extraction), [cli.md](cli.md) (CLI interface)
 
 ---
 
@@ -40,11 +40,18 @@ Environment-variable-based configuration for infrastructure settings:
 
 ## 3. API Contracts
 
+### 3.0 Health Check
+
+```
+GET /health
+Response: { "status": "ok" }
+```
+
 ### 3.1 Ingest Files
 ```
 POST /api/v1/documents/ingest
 Body: {
-    "source": "path/to/file/or/folder",
+    "source": "path/to/file/or/folder" | ["path1", "path2"],
     "storage_mode": "managed" | "external",
     "tags": ["optional", "tags"],
     "recursive": true
@@ -54,6 +61,30 @@ Response: {
     "skipped": [{ "path": "...", "reason": "unsupported_format" }]
 }
 ```
+
+The `source` field accepts either a single path (string) or a list of paths.
+
+### 3.1.1 Upload Files
+
+Upload files via multipart form data. Files are saved to `DATA_FOLDER/uploads/` then ingested.
+
+```
+POST /api/v1/documents/upload
+Content-Type: multipart/form-data
+
+Form fields:
+    files:              (required) One or more files
+    tags:               (optional) Comma-separated tags, default ""
+    storage_mode:       (optional) "managed" | "external", default "managed"
+    parse_after_upload:  (optional) true | false, default false
+
+Response: {
+    "documents": [{ "id": "...", "file_name": "...", "status": "new" }],
+    "skipped": [{ "path": "...", "reason": "unsupported_format" }]
+}
+```
+
+When `parse_after_upload` is `true`, a batch parse is triggered for all ingested documents.
 
 ### 3.2 Parse Documents
 ```

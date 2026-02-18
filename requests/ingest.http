@@ -42,3 +42,37 @@ Content-Type: application/json
   "storage_mode": "external",
   "tags": ["document", "external"]
 }
+
+### Upload files via multipart form (with auto-parse)
+POST http://localhost:8000/api/v1/documents/upload
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="files"; filename="report.pdf"
+Content-Type: application/pdf
+
+< ./report.pdf
+------Boundary
+Content-Disposition: form-data; name="tags"
+
+important,review
+------Boundary
+Content-Disposition: form-data; name="storage_mode"
+
+managed
+------Boundary
+Content-Disposition: form-data; name="parse_after_upload"
+
+true
+------Boundary--
+
+### Upload files via multipart form (minimal)
+POST http://localhost:8000/api/v1/documents/upload
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="files"; filename="document.pdf"
+Content-Type: application/pdf
+
+< ./document.pdf
+------Boundary--
