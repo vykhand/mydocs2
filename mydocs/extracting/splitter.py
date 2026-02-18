@@ -1,12 +1,15 @@
 """Document splitting and classification.
 
 Splits multi-document files into segments and classifies each segment
-by document type using batched LLM calls.
+by document type using batched LLM calls.  Persists classified segments
+as SubDocument objects on the parent Document.
 """
 
 import json
+from datetime import datetime, timezone
 
 import litellm
+from lightodm import generate_composite_id
 from tinystructlog import get_logger
 
 from mydocs.extracting.context import get_context
@@ -17,7 +20,7 @@ from mydocs.extracting.models import (
     SplitClassifyResult,
     SplitSegment,
 )
-from mydocs.models import DocumentPage
+from mydocs.models import Document, DocumentPage, SubDocument, SubDocumentPageRef
 
 log = get_logger(__name__)
 
@@ -195,10 +198,55 @@ def combine_overlapping_results(
 # Main Entry Point
 # ---------------------------------------------------------------------------
 
+async def _build_subdocuments(
+    document_id: str,
+    case_type: str,
+    segments: list[SplitSegment],
+    pages: list[DocumentPage],
+) -> list[SubDocument]:
+    """Build SubDocument objects from split segments.
+
+    Resolves page numbers to page IDs and creates deterministic SubDocument IDs.
+    """
+    # Build page_number → page lookup
+    page_by_number = {p.page_number: p for p in pages}
+
+    subdocuments = []
+    for segment in segments:
+        page_refs = []
+        for pn in segment.page_numbers:
+            page = page_by_number.get(pn)
+            if page:
+                page_refs.append(SubDocumentPageRef(
+                    document_id=document_id,
+                    page_id=str(page.id),
+                    page_number=pn,
+                ))
+
+        if not page_refs:
+            continue
+
+        min_page = min(pr.page_number for pr in page_refs)
+        subdoc_id = generate_composite_id([
+            document_id, case_type, segment.document_type, str(min_page),
+        ])
+
+        subdocuments.append(SubDocument(
+            id=subdoc_id,
+            case_type=case_type,
+            document_type=segment.document_type,
+            page_refs=page_refs,
+            created_at=datetime.now(timezone.utc),
+        ))
+
+    return subdocuments
+
+
 async def split_and_classify(
     document_id: str,
     prompt_config: PromptConfig,
     content_mode: ContentMode = ContentMode.MARKDOWN,
+    case_type: str = "generic",
 ) -> SplitClassifyResult:
     """Split and classify a document into typed segments.
 
@@ -206,9 +254,10 @@ async def split_and_classify(
         document_id: The document to split.
         prompt_config: Prompt configuration with batch_size and overlap_factor.
         content_mode: Which content representation to use.
+        case_type: Case type for SubDocument creation.
 
     Returns:
-        SplitClassifyResult with classified segments.
+        SplitClassifyResult with classified segments and persisted subdocuments.
     """
     batch_size = prompt_config.batch_size or 12
     overlap_factor = prompt_config.overlap_factor or 3
@@ -243,4 +292,16 @@ async def split_and_classify(
     segments = combine_overlapping_results(batch_results, batches)
 
     log.info(f"Split result: {len(segments)} segments")
-    return SplitClassifyResult(segments=segments)
+
+    # Build and persist SubDocuments on the parent Document
+    subdocuments = await _build_subdocuments(document_id, case_type, segments, pages)
+    if subdocuments:
+        doc = await Document.aget(document_id)
+        if doc:
+            doc.subdocuments = subdocuments
+            await doc.asave()
+            log.info(f"Persisted {len(subdocuments)} subdocuments on document {document_id}")
+        else:
+            log.warning(f"Document {document_id} not found, subdocuments not persisted")
+
+    return SplitClassifyResult(segments=segments, subdocuments=subdocuments)

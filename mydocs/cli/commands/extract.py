@@ -19,6 +19,7 @@ def register(subparsers):
     run_parser.add_argument("--fields", default=None, help="Comma-separated field names to extract (default: all)")
     run_parser.add_argument("--content-mode", choices=["markdown", "html"], default="markdown", help="Content mode (default: markdown)")
     run_parser.add_argument("--reference-granularity", choices=["full", "page", "none"], default="none", help="Reference granularity (default: none)")
+    run_parser.add_argument("--subdocument-id", default=None, help="SubDocument ID to scope extraction to")
 
     # extract results <case_id>
     results_parser = sub.add_parser("results", help="Show extraction results for a case")
@@ -74,6 +75,7 @@ async def _handle_run(args, output):
             fields=fields,
             content_mode=args.content_mode,
             reference_granularity=args.reference_granularity,
+            subdocument_id=getattr(args, "subdocument_id", None),
         )
 
         try:

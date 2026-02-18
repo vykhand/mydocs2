@@ -31,6 +31,9 @@ The engine operates on `Document` and `DocumentPage` models from [parsing-engine
 | **Field Result** | The extraction output: value, citation, justification, and optionally polygon references. |
 | **Extraction Mode** | Controls output structure: `referenced` (FieldResult with citations/references) or `direct` (raw Pydantic structured output, optionally followed by a reference-inference pass). |
 | **Reference Granularity** | Controls how much source-location detail is returned: `full`, `page`, or `none`. |
+| **SubDocument** | A classified segment within a parent `Document`, created by the split/classify step. Contains page references, a `case_type`, and a `document_type`. Embedded on the `Document` model. |
+| **Target Object** | A domain-specific MongoDB model (e.g., `InsuranceInvoice`) populated from extraction results. Registered via the target object registry as a `(case_type, document_type)` → `MongoBaseModel` mapping. |
+| **Case Type Config** | YAML configuration for a case type (`config/extracting/{case_type}/case_type.yaml`). Defines available document types, split/classify enablement, and prompt locations. |
 
 > **Note — Case model change**: The `Case` model (from `mydocs/models.py`) requires a new `type` field:
 >
@@ -257,6 +260,9 @@ class ExtractionRequest(BaseModel):
 
     reference_granularity: ReferenceGranularity = ReferenceGranularity.FULL
     content_mode: ContentMode = ContentMode.MARKDOWN
+
+    # SubDocument scoping
+    subdocument_id: Optional[str] = None         # If provided, scopes extraction to a sub-document
 ```
 
 ### 2.6 Extraction Response
@@ -271,11 +277,64 @@ class ExtractionResponse(BaseModel):
     results: dict                                # Referenced: {field_name: FieldResult}
                                                  # Direct: serialized Pydantic model as dict
     reference_annotations: Optional[list[FieldReference]] = None  # Direct mode + infer_references
+    subdocument_id: Optional[str] = None         # If extraction was scoped to a sub-document
+    target_object_id: Optional[str] = None       # If a target object was populated
     model_used: str
     reference_granularity: str
 ```
 
 Note: In referenced mode, `results` is `dict[str, FieldResult]`. In direct mode, `results` is the Pydantic model serialized via `.model_dump()`. The `extraction_mode` field tells the consumer how to interpret `results`.
+
+### 2.7 SubDocument
+
+When split/classify runs on a document, the resulting segments are persisted as `SubDocument` objects embedded in the parent `Document`.
+
+```python
+class SubDocumentPageRef(BaseModel):
+    """Reference to a single page within a sub-document."""
+    document_id: str
+    page_id: str
+    page_number: int
+
+class SubDocument(BaseModel):
+    """A classified segment within a parent document."""
+    id: str                                      # Deterministic: generate_composite_id([document_id, case_type, document_type, min_page_number])
+    case_type: str
+    document_type: str
+    page_refs: list[SubDocumentPageRef]
+    created_at: Optional[datetime] = None
+```
+
+The `Document` model gains a new optional field:
+```python
+class Document(MongoBaseModel):
+    ...
+    subdocuments: Optional[List[SubDocument]] = None
+```
+
+### 2.8 Case Type Configuration
+
+Defines the document types and split/classify settings for a case type. Loaded from `config/extracting/{case_type}/case_type.yaml`.
+
+```python
+class DocumentTypeConfig(BaseModel):
+    """Configuration for a document type within a case type."""
+    name: str                                    # e.g., "invoice"
+    description: Optional[str] = None
+    target_object: Optional[str] = None          # Registry key for target object class
+
+class SplitClassifyConfig(BaseModel):
+    """Split/classify enablement for a case type."""
+    enabled: bool = False
+    prompt_name: str = "main"                    # Prompt file name in split_classify/prompts/
+
+class CaseTypeConfig(BaseModel):
+    """Top-level configuration for a case type."""
+    name: str                                    # e.g., "insurance"
+    description: Optional[str] = None
+    split_classify: SplitClassifyConfig = SplitClassifyConfig()
+    document_types: list[DocumentTypeConfig] = []
+```
 
 ---
 
@@ -307,7 +366,9 @@ Splitting uses a batched approach for large documents:
 1. **Batch pages**: Divide document pages into batches of `batch_size` pages with `overlap_factor` page overlap between consecutive batches
 2. **Classify batches**: Send each batch to the LLM with the split/classify prompt
 3. **Merge results**: Combine batch results, resolving overlaps by preferring the batch where the boundary is more clearly visible
-4. **Create sub-documents**: Optionally create new `Document` records for each segment with the classified `document_type`
+4. **Persist sub-documents**: Resolve page numbers to page IDs, build `SubDocumentPageRef` and `SubDocument` objects with deterministic IDs (via `generate_composite_id`), and save them as embedded objects on the parent `Document`
+
+Split/classify is enabled per case type via `CaseTypeConfig.split_classify.enabled`. When enabled, the split/classify prompt is loaded from `config/extracting/{case_type}/split_classify/prompts/{prompt_name}.yaml`.
 
 ### 3.3 Split/Classify Prompt Config
 
@@ -355,6 +416,7 @@ For each extraction request, the engine executes a graph-based workflow:
 #### Step 1: Initialize
 
 - Resolve `case_type`: use `Case.type` if `case_id` is provided, otherwise use the request's `case_type` (default `"generic"`)
+- If `subdocument_id` is provided, find the matching `SubDocument` on the `Document`. Override `document_type` from the subdocument and scope `page_ids` to the subdocument's `page_refs`.
 - Load configs from `config/extracting/{case_type}/{document_type}/`
 - If `extraction_mode = "direct"`, load the output schema from the registry
 - Load `FieldDefinition` list for the requested `document_type`
@@ -427,9 +489,15 @@ When `extraction_mode = "direct"` and `infer_references = True`:
 4. LLM returns `ReferenceInferenceResult` — a list of `FieldReference` with `field_path` pointing to each leaf field and its supporting element references
 5. Optionally resolve references to polygons (same as Step 2e enrichment)
 
-#### Step 5: Return Response
+#### Step 5: Save Results & Target Object
 
-- Return `ExtractionResponse` with `results`, `extraction_mode`, and optionally `reference_annotations`
+- Save `FieldResultRecord` for each field result (with `subdocument_id` and `case_type`)
+- Look up target object class from registry via `get_target_object_class(case_type, document_type)`
+- If a target class is registered, create an instance, populate fields via type coercion (see Section 8.4), and save to the target object's collection
+
+#### Step 6: Return Response
+
+- Return `ExtractionResponse` with `results`, `extraction_mode`, `subdocument_id`, `target_object_id`, and optionally `reference_annotations`
 
 ### 4.3 Reference String Format
 
@@ -719,6 +787,26 @@ RETRIEVERS: dict[str, Callable] = {
 }
 ```
 
+### 8.4 Target Object Registry
+
+Maps `(case_type, document_type)` tuples to `MongoBaseModel` subclasses. When a target object is registered for a given pair, extraction results are also persisted to the target object's MongoDB collection.
+
+```python
+TARGET_OBJECTS: dict[tuple[str, str], type[MongoBaseModel]] = {}
+
+def register_target_object(case_type: str, document_type: str, model_class: type[MongoBaseModel]):
+    """Register a target object class for a (case_type, document_type) pair."""
+    TARGET_OBJECTS[(case_type, document_type)] = model_class
+
+def get_target_object_class(case_type: str, document_type: str) -> Optional[type[MongoBaseModel]]:
+    """Look up the registered target object class."""
+    return TARGET_OBJECTS.get((case_type, document_type))
+```
+
+Target object fields can be `FieldResult` or plain types (`str`, `int`, `float`, `bool`). If extraction produces a `FieldResult` but the target field expects a plain type, the value is coerced via `.content` (e.g., `FieldResult.content` → `str`, `int(FieldResult.content)` → `int`).
+
+Target objects live in the `case_types/` subpackage (see Section 13). Each case type's `__init__.py` registers its target objects on import.
+
 ---
 
 ## 9. Configuration File Layout
@@ -731,6 +819,7 @@ config/
   parser.yml
   extracting/
     {case_type}/                              # e.g., generic/, insurance_claim/
+      case_type.yaml                          # CaseTypeConfig — defines document types, split_classify settings
       {document_type}/                        # e.g., claim/, policy/, invoice/
         fields/
           {document_type}.yaml
@@ -742,7 +831,7 @@ config/
         prompt_manifest.yaml
       split_classify/                         # Case-type level (not document-type)
         prompts/
-          {name}.yaml
+          {name}.yaml                         # Split/classify prompt config (prompt_name from SplitClassifyConfig)
 ```
 
 All directory names are lowercase. Case types and document types can be any value in the database, but are always lowercased for config paths and filesystem directories.
@@ -980,17 +1069,23 @@ class UserFieldDefinition(MongoBaseModel):
 class FieldResultRecord(MongoBaseModel):
     document_id: str
     document_type: str
+    subdocument_id: str = ""                     # Empty for whole-document extraction
+    case_type: str = "generic"
     field_name: str
     result: FieldResult                          # The extraction output
 
     class Settings:
         name = "field_results"
-        composite_key = ["document_id", "field_name"]
+        composite_key = ["document_id", "subdocument_id", "field_name"]
 ```
 
-The composite key ensures that re-extracting the same field for the same document produces an idempotent upsert.
+The composite key ensures that re-extracting the same field for the same document/subdocument produces an idempotent upsert.
 
-### 12.3 Versioning
+### 12.3 Target Object Collections
+
+Target objects are `MongoBaseModel` subclasses registered via the target object registry (Section 8.4). Each target object defines its own collection name. Target object collections are not enumerated in this spec — they are defined per case type in the `case_types/` subpackage.
+
+### 12.4 Versioning
 
 Field definitions and prompt configs support versioning via content hashing:
 
@@ -1005,22 +1100,33 @@ Field definitions and prompt configs support versioning via content hashing:
 ```
 mydocs/
   extracting/
-    __init__.py
-    models.py                   # FieldDefinition, FieldResult, LLMFieldItem, etc.
+    __init__.py                 # Imports retrievers and case_types to trigger registration
+    models.py                   # FieldDefinition, FieldResult, LLMFieldItem, CaseTypeConfig, etc.
     config.py                   # ExtractingConfig (YAML loading)
     extractor.py                # BaseExtractor with graph-based pipeline
     retrievers.py               # Vector, fulltext, pages retriever factories
-    registry.py                 # Schema and retriever registries
+    registry.py                 # Schema, retriever, and target object registries
     enrichment.py               # Reference resolution, polygon calculation
     splitter.py                 # Document split/classify logic
-    prompt_utils.py             # Prompt and field config loading, versioning
+    prompt_utils.py             # Prompt, field, and case_type config loading
+    target_objects.py           # Type coercion and target object population
     schemas/                    # Custom output schemas
       __init__.py
+    case_types/                 # Case-type subpackages with target objects
+      __init__.py               # Imports all case_type packages to trigger registration
+      generic/
+        __init__.py             # Minimal (no target objects for generic)
+      {case_type}/              # Domain-specific case types (e.g., insurance/)
+        __init__.py             # Registers target objects on import
+        models.py               # MongoBaseModel subclasses for target objects
 config/
   extracting/
     {case_type}/
+      case_type.yaml            # CaseTypeConfig
       {document_type}/
         fields/
+        prompts/
+      split_classify/
         prompts/
 ```
 

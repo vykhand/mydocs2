@@ -1,7 +1,8 @@
-"""Schema and retriever registries for the extracting engine."""
+"""Schema, retriever, and target object registries for the extracting engine."""
 
-from typing import Callable
+from typing import Callable, Optional
 
+from lightodm import MongoBaseModel
 from pydantic import BaseModel
 
 from mydocs.extracting.exceptions import RetrieverNotFoundError, SchemaNotFoundError
@@ -17,6 +18,9 @@ SCHEMAS: dict[str, type[BaseModel]] = {
 # Populated by retrievers.py on import to avoid circular imports
 RETRIEVERS: dict[str, Callable] = {}
 
+# Target object registry: maps (case_type, document_type) to MongoBaseModel subclasses
+TARGET_OBJECTS: dict[tuple[str, str], type[MongoBaseModel]] = {}
+
 
 def get_schema(name: str) -> type[BaseModel]:
     """Look up a registered output schema by name."""
@@ -30,3 +34,20 @@ def get_retriever(name: str) -> Callable:
     if name not in RETRIEVERS:
         raise RetrieverNotFoundError(f"Retriever '{name}' not registered. Available: {list(RETRIEVERS.keys())}")
     return RETRIEVERS[name]
+
+
+def register_target_object(
+    case_type: str,
+    document_type: str,
+    model_class: type[MongoBaseModel],
+) -> None:
+    """Register a target object class for a (case_type, document_type) pair."""
+    TARGET_OBJECTS[(case_type, document_type)] = model_class
+
+
+def get_target_object_class(
+    case_type: str,
+    document_type: str,
+) -> Optional[type[MongoBaseModel]]:
+    """Look up the registered target object class."""
+    return TARGET_OBJECTS.get((case_type, document_type))

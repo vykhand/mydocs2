@@ -78,6 +78,22 @@ class FileMetadata(BaseModel):
     image_height: Optional[int] = None
 
 
+class SubDocumentPageRef(BaseModel):
+    """Reference to a single page within a sub-document."""
+    document_id: str
+    page_id: str
+    page_number: int
+
+
+class SubDocument(BaseModel):
+    """A classified segment within a parent document."""
+    id: str
+    case_type: str
+    document_type: str
+    page_refs: List[SubDocumentPageRef]
+    created_at: Optional[datetime] = None
+
+
 class DocumentElement(BaseModel):
     id: str = Field(..., description="Globally unique element ID (deterministic hash)")
     page_id: str = Field(..., description="Reference to the page containing this element")
@@ -149,6 +165,7 @@ class Document(MongoBaseModel):
     parser_config_hash: Optional[str] = None
 
     elements: Optional[List[DocumentElement]] = None
+    subdocuments: Optional[List[SubDocument]] = None
 
     tags: List[str] = Field(default_factory=list)
 

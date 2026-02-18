@@ -147,11 +147,35 @@ class SplitSegment(BaseModel):
 class SplitClassifyResult(BaseModel):
     """Result of splitting and classifying a document."""
     segments: list[SplitSegment]
+    subdocuments: list[Any] = Field(default_factory=list)  # list[SubDocument] from models.py
 
 
 class LLMSplitClassifyBatchResult(BaseModel):
     """LLM output for a batch of pages."""
     result: list[SplitSegment]
+
+
+# ---------------------------------------------------------------------------
+# Case Type Configuration
+# ---------------------------------------------------------------------------
+
+class DocumentTypeConfig(BaseModel):
+    """Configuration for a document type within a case type."""
+    name: str
+    description: Optional[str] = None
+    target_object: Optional[str] = None
+
+class SplitClassifyConfig(BaseModel):
+    """Split/classify enablement for a case type."""
+    enabled: bool = False
+    prompt_name: str = "main"
+
+class CaseTypeConfig(BaseModel):
+    """Top-level configuration for a case type."""
+    name: str
+    description: Optional[str] = None
+    split_classify: SplitClassifyConfig = Field(default_factory=SplitClassifyConfig)
+    document_types: list[DocumentTypeConfig] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +201,8 @@ class ExtractionRequest(BaseModel):
     reference_granularity: ReferenceGranularity = ReferenceGranularity.FULL
     content_mode: ContentMode = ContentMode.MARKDOWN
 
+    subdocument_id: Optional[str] = None
+
 
 class ExtractionResponse(BaseModel):
     """Response from field extraction."""
@@ -186,6 +212,8 @@ class ExtractionResponse(BaseModel):
     extraction_mode: str
     results: dict
     reference_annotations: Optional[list[FieldReference]] = None
+    subdocument_id: Optional[str] = None
+    target_object_id: Optional[str] = None
     model_used: str
     reference_granularity: str
 
@@ -197,12 +225,14 @@ class ExtractionResponse(BaseModel):
 class FieldResultRecord(MongoBaseModel):
     document_id: str
     document_type: str
+    subdocument_id: str = ""
+    case_type: str = "generic"
     field_name: str
     result: FieldResult
 
     class Settings:
         name = "field_results"
-        composite_key = ["document_id", "field_name"]
+        composite_key = ["document_id", "subdocument_id", "field_name"]
 
 
 class UserFieldDefinition(MongoBaseModel):
@@ -330,6 +360,7 @@ class ExtractorState(BaseModel):
     document_type: str = "generic"
     document_ids: list[str] = Field(default_factory=list)
     page_ids: Optional[list[str]] = None
+    subdocument_id: str = ""
     extraction_mode: ExtractionMode = ExtractionMode.REFERENCED
     output_schema_name: str = "default"
     infer_references: bool = False

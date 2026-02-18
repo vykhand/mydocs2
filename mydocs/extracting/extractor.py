@@ -42,8 +42,9 @@ from mydocs.extracting.prompt_utils import (
     validate_field_consistency,
     validate_prompt_consistency,
 )
-from mydocs.extracting.registry import get_retriever, get_schema
-from mydocs.models import Case
+from mydocs.extracting.registry import get_retriever, get_schema, get_target_object_class
+from mydocs.extracting.target_objects import populate_target_object
+from mydocs.models import Case, Document
 
 log = get_logger(__name__)
 
@@ -79,9 +80,10 @@ class BaseExtractor:
         return ExtractorState(
             case_id=self.request.case_id,
             case_type=case_type,
-            document_type=self.request.document_type,
+            document_type=self.document_type,
             document_ids=self.request.document_ids or [],
             page_ids=self.request.page_ids,
+            subdocument_id=self.request.subdocument_id or "",
             extraction_mode=self.request.extraction_mode,
             output_schema_name=self.request.output_schema or "default",
             infer_references=self.request.infer_references,
@@ -95,11 +97,45 @@ class BaseExtractor:
             ),
         )
 
+    async def _resolve_subdocument(self) -> None:
+        """If subdocument_id is provided, scope extraction to the subdocument."""
+        if not self.request.subdocument_id or not self.request.document_ids:
+            return
+
+        doc = await Document.aget(self.request.document_ids[0])
+        if not doc or not doc.subdocuments:
+            log.warning(f"No subdocuments on document {self.request.document_ids[0]}")
+            return
+
+        subdoc = next(
+            (s for s in doc.subdocuments if s.id == self.request.subdocument_id),
+            None,
+        )
+        if not subdoc:
+            log.warning(f"SubDocument {self.request.subdocument_id} not found")
+            return
+
+        # Override document_type from subdocument
+        self.document_type = subdoc.document_type
+        self.case_type = subdoc.case_type
+
+        # Scope page_ids to subdocument's pages
+        self.request.page_ids = [pr.page_id for pr in subdoc.page_refs]
+
+        log.info(
+            f"Scoped to subdocument {subdoc.id}: "
+            f"type={subdoc.document_type}, pages={len(subdoc.page_refs)}"
+        )
+
     async def run(self) -> ExtractionResponse:
         """Execute the full extraction pipeline."""
         # Step 1: Initialize
         case_type = await self._resolve_case_type()
         self.case_type = case_type
+
+        # Subdocument scoping
+        await self._resolve_subdocument()
+        case_type = self.case_type  # May have been overridden by subdocument
 
         # Load field definitions
         field_definitions = get_all_fields(case_type, self.document_type)
@@ -161,10 +197,14 @@ class BaseExtractor:
             name: result.model_dump() for name, result in all_field_results.items()
         }
 
-        # Step 5: Save results
+        # Step 5: Save results and target object
+        target_object_id = None
         if self.request.document_ids:
             for doc_id in self.request.document_ids:
                 await self._save_results(doc_id, all_field_results)
+                tid = await self._save_target_object(doc_id, all_field_results)
+                if tid:
+                    target_object_id = tid
 
         # Return response
         return ExtractionResponse(
@@ -173,6 +213,8 @@ class BaseExtractor:
             case_type=case_type,
             extraction_mode=self.request.extraction_mode,
             results=results_dict,
+            subdocument_id=self.request.subdocument_id,
+            target_object_id=target_object_id,
             model_used=model_used,
             reference_granularity=self.request.reference_granularity,
         )
@@ -193,6 +235,7 @@ class BaseExtractor:
             group_state.fields,
             document_id,
             self.document_type,
+            subdocument_id=self.request.subdocument_id or "",
         )
         group_state.prompt_input = prompt_input
 
@@ -320,12 +363,42 @@ class BaseExtractor:
         field_results: dict[str, FieldResult],
     ) -> None:
         """Save extraction results to the field_results collection."""
+        subdocument_id = self.request.subdocument_id or ""
         for field_name, result in field_results.items():
             record = FieldResultRecord(
                 document_id=document_id,
                 document_type=self.document_type,
+                subdocument_id=subdocument_id,
+                case_type=self.case_type,
                 field_name=field_name,
                 result=result,
             )
             await record.asave()
             log.debug(f"Saved field result: {document_id}/{field_name}")
+
+    async def _save_target_object(
+        self,
+        document_id: str,
+        field_results: dict[str, FieldResult],
+    ) -> str | None:
+        """Save a target object if one is registered for this (case_type, document_type)."""
+        target_cls = get_target_object_class(self.case_type, self.document_type)
+        if not target_cls:
+            return None
+
+        subdocument_id = self.request.subdocument_id or ""
+
+        target_obj = target_cls(
+            document_id=document_id,
+            subdocument_id=subdocument_id,
+            case_id=self.request.case_id or "",
+        )
+        populate_target_object(target_obj, field_results)
+        await target_obj.asave()
+
+        target_id = str(target_obj.id)
+        log.info(
+            f"Saved target object {target_cls.__name__} "
+            f"(id={target_id}) for {self.case_type}/{self.document_type}"
+        )
+        return target_id

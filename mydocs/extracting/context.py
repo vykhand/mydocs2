@@ -116,6 +116,7 @@ async def get_prompt_input(
     fields: list[FieldDefinition],
     document_id: str,
     document_type: str,
+    subdocument_id: str = "",
 ) -> PromptInput:
     """Build the complete prompt input for an extraction group.
 
@@ -132,8 +133,12 @@ async def get_prompt_input(
         field_inputs = []
         for field in fields_with_inputs:
             for req in field.inputs:
-                # Look up previously extracted result
-                query = {"document_id": document_id, "field_name": req.field_name}
+                # Look up previously extracted result, scoped by subdocument_id
+                query = {
+                    "document_id": document_id,
+                    "field_name": req.field_name,
+                    "subdocument_id": subdocument_id,
+                }
                 records = await FieldResultRecord.afind(query)
                 content = None
                 if records:

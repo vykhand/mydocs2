@@ -13,7 +13,12 @@ from tinystructlog import get_logger
 
 import mydocs.config as C
 from mydocs.extracting.exceptions import ConfigNotFoundError, FieldConsistencyError
-from mydocs.extracting.models import FieldDefinition, PromptConfig
+from mydocs.extracting.models import (
+    CaseTypeConfig,
+    FieldDefinition,
+    PromptConfig,
+    SplitClassifyConfig,
+)
 
 log = get_logger(__name__)
 
@@ -88,6 +93,60 @@ def get_local_configs(
 def generate_config_id(case_type: str, document_type: str, name: str) -> str:
     """Generate a deterministic config ID from case_type, document_type, and name."""
     return f"{case_type}_{document_type}_{name}"
+
+
+# ---------------------------------------------------------------------------
+# Case type config loading
+# ---------------------------------------------------------------------------
+
+def load_case_type_config(case_type: str) -> CaseTypeConfig:
+    """Load case type configuration from config/extracting/{case_type}/case_type.yaml.
+
+    Returns a default CaseTypeConfig if the file does not exist.
+    """
+    config_path = os.path.join(EXTRACTING_CONFIG_ROOT, case_type, "case_type.yaml")
+    if not os.path.isfile(config_path):
+        log.debug(f"No case_type.yaml for '{case_type}', using defaults")
+        return CaseTypeConfig(name=case_type)
+
+    data = load_yaml_file(config_path)
+    if isinstance(data, dict):
+        return CaseTypeConfig(**data)
+
+    log.warning(f"Invalid case_type.yaml format at {config_path}")
+    return CaseTypeConfig(name=case_type)
+
+
+def get_split_classify_prompt(case_type: str, prompt_name: str = "main") -> PromptConfig:
+    """Load the split-classify prompt for a case type.
+
+    Looks in config/extracting/{case_type}/split_classify/prompts/{prompt_name}.yaml.
+    Falls back to the generic case_type's split_classify prompt if not found.
+    """
+    primary = os.path.join(
+        EXTRACTING_CONFIG_ROOT, case_type, "split_classify", "prompts", f"{prompt_name}.yaml"
+    )
+    if os.path.isfile(primary):
+        data = load_yaml_file(primary)
+        if isinstance(data, dict):
+            return PromptConfig(**data)
+
+    if case_type != "generic":
+        fallback = os.path.join(
+            EXTRACTING_CONFIG_ROOT, "generic", "split_classify", "prompts", f"{prompt_name}.yaml"
+        )
+        if os.path.isfile(fallback):
+            log.info(
+                f"Split-classify prompt not found for {case_type}, "
+                f"falling back to generic"
+            )
+            data = load_yaml_file(fallback)
+            if isinstance(data, dict):
+                return PromptConfig(**data)
+
+    raise ConfigNotFoundError(
+        f"Split-classify prompt '{prompt_name}' not found for case_type '{case_type}'"
+    )
 
 
 # ---------------------------------------------------------------------------

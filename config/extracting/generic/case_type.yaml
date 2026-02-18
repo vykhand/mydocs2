@@ -1,0 +1,7 @@
+name: generic
+description: Default case type for general-purpose document processing
+split_classify:
+  enabled: false
+document_types:
+  - name: generic
+    description: Default document type
