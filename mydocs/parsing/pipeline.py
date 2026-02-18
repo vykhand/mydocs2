@@ -14,6 +14,7 @@ from mydocs.models import (
     Document,
     DocumentStatusEnum,
     FileTypeEnum,
+    MetadataSidecar,
     StorageBackendEnum,
     StorageModeEnum,
 )
@@ -141,11 +142,29 @@ async def ingest_files(
             managed_path, managed_file_name = await storage.copy_to_managed(str(file_path), doc.id)
             doc.managed_path = managed_path
             doc.file_name = managed_file_name
+
+        # Build full MetadataSidecar for both modes
+        sidecar = MetadataSidecar(
+            storage_backend=doc.storage_backend,
+            original_path=doc.original_path,
+            original_file_name=doc.original_file_name,
+            file_type=doc.file_type,
+            storage_mode=doc.storage_mode,
+            managed_path=doc.managed_path,
+            file_metadata=doc.file_metadata,
+            document_type=doc.document_type,
+            tags=doc.tags,
+            status=doc.status,
+            parser_engine=doc.parser_engine,
+            parser_config_hash=doc.parser_config_hash,
+            created_at=doc.created_at,
+            modified_at=doc.modified_at,
+        )
+        sidecar_data = sidecar.model_dump(exclude_none=True)
+
+        if storage_mode == StorageModeEnum.MANAGED:
+            await storage.write_managed_sidecar(doc.id, sidecar_data)
         else:
-            # External mode: write sidecar metadata file as <id>.metadata.json
-            sidecar_data = file_metadata.model_dump(exclude_none=True)
-            sidecar_data["original_file_name"] = file_path.name
-            sidecar_data["original_path"] = str(file_path.resolve())
             await storage.write_metadata_sidecar(str(file_path), doc.id, sidecar_data)
 
         await doc.asave()

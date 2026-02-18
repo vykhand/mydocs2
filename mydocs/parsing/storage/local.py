@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import shutil
 import zlib
@@ -35,9 +36,21 @@ class LocalFileStorage(FileStorage):
         """Write <doc_id>.metadata.json alongside the source file."""
         sidecar_path = os.path.join(os.path.dirname(source_path), f"{doc_id}.metadata.json")
         async with aiofiles.open(sidecar_path, "w") as f:
-            import json
             await f.write(json.dumps(metadata, indent=2, default=str))
         return sidecar_path
+
+    async def write_managed_sidecar(self, doc_id: str, metadata: dict) -> str:
+        """Write <doc_id>.metadata.json in managed storage root."""
+        sidecar_path = os.path.join(self.managed_root, f"{doc_id}.metadata.json")
+        async with aiofiles.open(sidecar_path, "w") as f:
+            await f.write(json.dumps(metadata, indent=2, default=str))
+        return sidecar_path
+
+    async def read_sidecar(self, sidecar_path: str) -> dict:
+        """Read and parse a metadata sidecar JSON file."""
+        async with aiofiles.open(sidecar_path, "r") as f:
+            content = await f.read()
+        return json.loads(content)
 
     async def get_file_bytes(self, path: str) -> bytes:
         """Read file contents as bytes."""

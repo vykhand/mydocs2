@@ -4,7 +4,7 @@
 **Version**: 1.0
 **Status**: Draft
 
-**Related Specs**: [parsing-engine.md](parsing-engine.md) (pipeline functions), [retrieval-engine.md](retrieval-engine.md) (search), [backend.md](backend.md) (HTTP API), [migrations.md](migrations.md) (database migrations)
+**Related Specs**: [parsing-engine.md](parsing-engine.md) (pipeline functions), [retrieval-engine.md](retrieval-engine.md) (search), [backend.md](backend.md) (HTTP API), [migrations.md](migrations.md) (database migrations), [sync.md](sync.md) (storage-to-DB sync)
 
 ---
 
@@ -193,7 +193,39 @@ mydocs extract results abc123
 mydocs extract results abc123 --output json
 ```
 
-### 4.8 `mydocs cases`
+### 4.8 `mydocs sync`
+
+Storage-to-DB synchronization. Scans managed storage and compares with database state to rebuild lost records. See [sync.md](sync.md) for the full sync specification.
+
+```
+mydocs sync status                      # Scan and show sync plan (read-only)
+    --scan-path PATH                    # Override managed storage path (default: data/managed/)
+    --verify-content                    # Verify file content via SHA256 (slower)
+    --output json|table|quiet           # Output format (default: table)
+
+mydocs sync run                         # Execute sync plan
+    --scan-path PATH                    # Override managed storage path
+    --verify-content                    # Verify file content via SHA256
+    --reparse                           # Re-parse documents with content mismatches
+    --actions restore,sidecar_missing   # Comma-separated actions to execute (default: all)
+    --dry-run                           # Show plan without executing
+    --output json|table|quiet           # Output format (default: table)
+
+mydocs sync write-sidecars              # Write missing sidecars from DB records
+    --scan-path PATH                    # Override managed storage path
+    --output json|table|quiet           # Output format (default: table)
+```
+
+**Examples**:
+```bash
+mydocs sync status
+mydocs sync status --verify-content --output json
+mydocs sync run --actions restore
+mydocs sync run --reparse --dry-run
+mydocs sync write-sidecars
+```
+
+### 4.9 `mydocs cases`
 
 Case management subcommands.
 
@@ -316,6 +348,7 @@ mydocs2/                            # Project root
         extract.py
         config.py
         migrate.py
+        sync.py
       formatters.py                 # Output formatting utilities
 ```
 

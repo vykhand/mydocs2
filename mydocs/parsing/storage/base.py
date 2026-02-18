@@ -29,6 +29,24 @@ class FileStorage(ABC):
         ...
 
     @abstractmethod
+    async def write_managed_sidecar(self, doc_id: str, metadata: dict) -> str:
+        """Write a <doc_id>.metadata.json sidecar file in managed storage.
+
+        Returns:
+            Path to the sidecar file.
+        """
+        ...
+
+    @abstractmethod
+    async def read_sidecar(self, sidecar_path: str) -> dict:
+        """Read and parse a metadata sidecar JSON file.
+
+        Returns:
+            Parsed sidecar dict.
+        """
+        ...
+
+    @abstractmethod
     async def get_file_bytes(self, path: str) -> bytes:
         """Read file contents as bytes."""
         ...

@@ -88,6 +88,43 @@ class DocumentElement(BaseModel):
     element_data: dict
 
 
+# --- Sidecar Model ---
+
+class MetadataSidecar(BaseModel):
+    """Metadata sidecar written alongside managed/external files for DB recovery.
+
+    Contains all fields needed to reconstruct a Document record from disk.
+    Written during ingestion for both managed and external storage modes.
+    """
+
+    # Identity (used to recompute document ID via composite key)
+    storage_backend: StorageBackendEnum
+    original_path: str
+
+    # File info
+    original_file_name: str
+    file_type: FileTypeEnum
+    storage_mode: StorageModeEnum
+    managed_path: Optional[str] = None
+
+    # Full file metadata
+    file_metadata: Optional[FileMetadata] = None
+
+    # Document state
+    document_type: DocumentTypeEnum = DocumentTypeEnum.GENERIC
+    tags: List[str] = Field(default_factory=list)
+    status: DocumentStatusEnum = DocumentStatusEnum.NEW
+    parser_engine: Optional[str] = None
+    parser_config_hash: Optional[str] = None
+
+    # Timestamps
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+
+    # Sidecar meta (for forward compatibility)
+    sidecar_version: int = 1
+
+
 # --- Collection Models ---
 
 class Document(MongoBaseModel):

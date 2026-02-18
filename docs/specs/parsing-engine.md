@@ -4,7 +4,7 @@
 **Version**: 1.2
 **Status**: Draft
 
-**Related Specs**: [retrieval-engine.md](retrieval-engine.md) (search & embeddings), [backend.md](backend.md) (HTTP API & app config), [migrations.md](migrations.md) (index migrations), [cli.md](cli.md) (CLI interface)
+**Related Specs**: [retrieval-engine.md](retrieval-engine.md) (search & embeddings), [backend.md](backend.md) (HTTP API & app config), [migrations.md](migrations.md) (index migrations), [cli.md](cli.md) (CLI interface), [sync.md](sync.md) (storage-to-DB sync)
 
 ---
 
@@ -62,14 +62,19 @@ Files can be imported in two modes:
 #### 2.3.1 Managed Mode
 - The file is **copied** into managed storage
 - The managed storage path is recorded in the document model
+- A **metadata sidecar** (`<doc_id>.metadata.json`) is written alongside the managed file for DB recovery (see [sync.md](sync.md) for `MetadataSidecar` schema)
 - Initial backend: local filesystem mapped to `./data/managed/`
 - Future backends: Azure Blob Storage, S3, GCP Cloud Storage
 
 #### 2.3.2 External Mode
 - The file **remains at its original location**
-- Only metadata is stored (as a sidecar JSON file: `<doc_id>.metadata.json` alongside the original file, and in the database)
+- A **metadata sidecar** (`<doc_id>.metadata.json`) is written alongside the original file (same directory) for DB recovery
 - The original path/URI is recorded for access
 - Useful for large file repositories where copying is impractical
+
+#### 2.3.3 Metadata Sidecar
+
+Both storage modes write a `MetadataSidecar` JSON file during ingestion. The sidecar contains all fields needed to reconstruct a `Document` record from disk, enabling database recovery via the sync module. The `MetadataSidecar` model is defined in `mydocs/models.py`; see [sync.md](sync.md) for the full schema and sync algorithm.
 
 ### 2.4 Managed File Store Backends
 

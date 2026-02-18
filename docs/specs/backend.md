@@ -4,7 +4,7 @@
 **Version**: 1.0
 **Status**: Draft
 
-**Related Specs**: [parsing-engine.md](parsing-engine.md) (data models, pipeline), [retrieval-engine.md](retrieval-engine.md) (search), [extracting-engine.md](extracting-engine.md) (extraction), [cli.md](cli.md) (CLI interface)
+**Related Specs**: [parsing-engine.md](parsing-engine.md) (data models, pipeline), [retrieval-engine.md](retrieval-engine.md) (search), [extracting-engine.md](extracting-engine.md) (extraction), [cli.md](cli.md) (CLI interface), [sync.md](sync.md) (storage-to-DB sync)
 
 ---
 
@@ -419,6 +419,44 @@ Response: {
 }
 ```
 
+### 3.13 Sync
+
+Storage-to-DB synchronization endpoints. See [sync.md](sync.md) for the full sync specification.
+
+#### 3.13.1 Build Sync Plan
+```
+POST /api/v1/sync/plan
+Body: {
+    "scan_path": "data/managed/",
+    "verify_content": false
+}
+Response: { ... SyncPlan model ... }
+```
+
+#### 3.13.2 Execute Sync
+```
+POST /api/v1/sync/execute
+Body: {
+    "scan_path": "data/managed/",
+    "verify_content": false,
+    "reparse": false,
+    "actions": ["restore", "sidecar_missing"]
+}
+Response: { ... SyncReport model ... }
+```
+
+#### 3.13.3 Write Sidecars
+```
+POST /api/v1/sync/write-sidecars
+Body: {
+    "scan_path": "data/managed/"
+}
+Response: {
+    "written": 5,
+    "skipped": 2
+}
+```
+
 ---
 
 ## 4. Database Architecture
@@ -485,6 +523,7 @@ mydocs/
       documents.py              # Ingest, parse, get, tags endpoints
       search.py                 # Search and index listing endpoints
       cases.py                  # Case CRUD and document assignment endpoints
+      sync.py                   # Sync plan, execute, write-sidecars endpoints
     dependencies.py             # FastAPI dependency injection
 ```
 

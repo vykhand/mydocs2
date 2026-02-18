@@ -1,6 +1,7 @@
 """Output formatting utilities for the CLI."""
 
 import json
+import os
 import sys
 
 
@@ -315,6 +316,59 @@ def format_field_results(records, mode: str) -> None:
                 justification = justification[:57] + "..."
             rows.append([r.field_name, content, justification])
         print_table(headers, rows)
+
+
+def format_sync_plan(plan, mode: str) -> None:
+    """Format and print a sync plan."""
+    if mode == "json":
+        print(plan.model_dump_json(indent=2))
+    elif mode == "quiet":
+        for action, count in sorted(plan.summary.items()):
+            print(f"{action}: {count}")
+    else:
+        if not plan.items:
+            print("No items in sync plan.")
+            return
+        headers = ["Action", "Doc ID", "File", "Reason"]
+        rows = [
+            [
+                item.action.value,
+                item.doc_id[:12] + "...",
+                os.path.basename(item.file_path) if item.file_path else "-",
+                item.reason[:60],
+            ]
+            for item in plan.items
+        ]
+        print_table(headers, rows)
+        print(f"\nSummary: {plan.summary}")
+        print(f"Scan path: {plan.scan_path}")
+
+
+def format_sync_report(report, mode: str) -> None:
+    """Format and print a sync report."""
+    if mode == "json":
+        print(report.model_dump_json(indent=2))
+    elif mode == "quiet":
+        for action, counts in sorted(report.summary.items()):
+            print(f"{action}: success={counts['success']} failed={counts['failed']}")
+    else:
+        if not report.items:
+            print("No items executed.")
+            return
+        headers = ["Action", "Doc ID", "Status", "Error"]
+        rows = [
+            [
+                r.item.action.value,
+                r.item.doc_id[:12] + "...",
+                "OK" if r.success else "FAILED",
+                (r.error or "")[:50],
+            ]
+            for r in report.items
+        ]
+        print_table(headers, rows)
+        print(f"\nSummary: {report.summary}")
+        elapsed = (report.completed_at - report.started_at).total_seconds()
+        print(f"Duration: {elapsed:.1f}s")
 
 
 def format_config(serialized_config, mode: str) -> None:
