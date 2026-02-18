@@ -7,8 +7,8 @@ load_dotenv()
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "mydocs")
 
 ROOT_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA_FOLDER = os.environ.get("DATA_FOLDER", os.path.join(ROOT_FOLDER, "data"))
-CONFIG_ROOT = os.environ.get("CONFIG_ROOT", os.path.join(ROOT_FOLDER, "config"))
+DATA_FOLDER = os.environ.get("MYDOCS_DATA_FOLDER", os.path.join(ROOT_FOLDER, "data"))
+CONFIG_ROOT = os.environ.get("MYDOCS_CONFIG_ROOT", os.path.join(ROOT_FOLDER, "config"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
 MONGO_URL = os.environ.get("MONGO_URL")
