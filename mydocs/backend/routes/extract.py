@@ -51,7 +51,7 @@ class SplitClassifyRequest(ExtractionRequest):
     Extends ExtractionRequest — the document_type field is used to
     locate the split_classify prompt config.
     """
-    pass
+    force: bool = False
 
 
 @router.post("/split-classify", response_model=SplitClassifyResult)
@@ -75,6 +75,7 @@ async def split_classify(request: SplitClassifyRequest):
             prompt_config=prompt_config,
             content_mode=request.content_mode,
             case_type=case_type,
+            force=request.force,
         )
         return result
     except HTTPException:

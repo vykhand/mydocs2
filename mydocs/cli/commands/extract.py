@@ -36,6 +36,7 @@ def register(subparsers):
     sc_parser.add_argument("document_id", help="Document ID")
     sc_parser.add_argument("--case-type", default="generic", help="Case type (default: generic)")
     sc_parser.add_argument("--content-mode", choices=["markdown", "html"], default="markdown", help="Content mode (default: markdown)")
+    sc_parser.add_argument("--force", action="store_true", default=False, help="Force re-classification even if hashes match")
 
     parser.add_argument(
         "--output",
@@ -135,10 +136,13 @@ async def _handle_split_classify(args, output):
 
     prompt_config = get_split_classify_prompt(case_type)
 
+    force = getattr(args, "force", False)
+
     result = await split_and_classify(
         document_id=document_id,
         prompt_config=prompt_config,
         content_mode=content_mode,
         case_type=case_type,
+        force=force,
     )
     format_split_classify_result(result, output)

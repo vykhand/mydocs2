@@ -94,6 +94,14 @@ class SubDocument(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class SplitClassifyMeta(BaseModel):
+    """Tracks inputs of the last split-classify run for idempotency."""
+    file_sha256: str
+    config_hash: str
+    case_type: str
+    completed_at: datetime
+
+
 class DocumentElement(BaseModel):
     id: str = Field(..., description="Globally unique element ID (deterministic hash)")
     page_id: str = Field(..., description="Reference to the page containing this element")
@@ -166,6 +174,7 @@ class Document(MongoBaseModel):
 
     elements: Optional[List[DocumentElement]] = None
     subdocuments: Optional[List[SubDocument]] = None
+    split_classify_meta: Optional[SplitClassifyMeta] = None
 
     tags: List[str] = Field(default_factory=list)
 

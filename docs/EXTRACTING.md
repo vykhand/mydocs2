@@ -74,7 +74,9 @@ All enumerations, field definitions, result models, request/response types, Mong
 |-------|-------------|
 | `SubDocumentPageRef` | Reference to a single page within a sub-document (document_id, page_id, page_number) |
 | `SubDocument` | A classified segment embedded on `Document` — id, case_type, document_type, page_refs |
-| `Document.subdocuments` | New optional field: `Optional[List[SubDocument]]` |
+| `SplitClassifyMeta` | Tracks inputs (file_sha256, config_hash, case_type, completed_at) of the last split-classify run for idempotency |
+| `Document.subdocuments` | Optional field: `Optional[List[SubDocument]]` |
+| `Document.split_classify_meta` | Optional field: `Optional[SplitClassifyMeta]` — used for hash-based idempotency |
 
 > **Spec deviation — `DocumentTypeEnum`**: The spec defines a `DocumentTypeEnum(StrEnum)` that should be extended with domain types. This enum is **not present** in `models.py`; document types are plain strings throughout.
 
@@ -211,9 +213,14 @@ Lookup functions: `get_schema(name)`, `get_retriever(name)`, `get_target_object_
 
 **`run_llm_split_classify(context, prompt_config, batch_num, total_batches)`**: Sends a page batch to the LLM with `{context}`, `{batch_num}`, `{total_batches}` template variables. Uses `LLMSplitClassifyBatchResult` as structured output. Uses the same two-level retry strategy as `_call_llm()` (transport retries via `transport_retries`, validation retries via `validation_retries` loop).
 
-**`combine_overlapping_results(batch_results, batches)`**: Merges overlapping batch results. For pages classified in multiple batches, prefers the classification from the batch where the page is more centrally positioned (not at the boundary). Produces contiguous `SplitSegment` list.
+**`combine_overlapping_results(batch_results, batches)`**: Merges overlapping batch results using a 4-phase algorithm that preserves within-batch segment boundaries:
 
-**`split_and_classify(document_id, prompt_config, content_mode, case_type)`**: Main entry point. Fetches all pages for a document, batches them, classifies each batch via LLM, and merges results. After merging, builds `SubDocument` objects with deterministic IDs and persists them on the parent `Document`. Returns `SplitClassifyResult` with both `segments` and `subdocuments`.
+1. **Tag**: For each page, record `(document_type, batch_idx, segment_idx)` from every batch
+2. **Select**: For overlapping pages, pick the tag from the batch where the page is most central
+3. **Build**: Walk sorted pages; start a new segment when the tag changes (type, batch_idx, or segment_idx). This preserves within-batch boundaries — e.g. 10 separate receipts stay as 10 segments
+4. **Stitch**: Merge adjacent segments at batch boundaries only if their boundary pages share the same segment in an overlapping batch
+
+**`split_and_classify(document_id, prompt_config, content_mode, case_type, force=False)`**: Main entry point. Supports hash-based idempotency — if the document's file hash (`file_metadata.sha256`), config hash (SHA256 of serialized `PromptConfig`), and `case_type` all match the stored `SplitClassifyMeta`, the existing subdocuments are returned without LLM calls. Pass `force=True` to bypass this check. When classification runs, fetches all pages, batches them, classifies each batch via LLM, merges results, builds `SubDocument` objects with deterministic IDs, persists both subdocuments and `SplitClassifyMeta` on the parent `Document`. Returns `SplitClassifyResult` with both `segments` and `subdocuments`.
 
 ### `exceptions.py` — Exception Hierarchy
 

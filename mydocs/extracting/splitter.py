@@ -7,6 +7,7 @@ as SubDocument objects on the parent Document.
 
 import json
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 import litellm
 from lightodm import generate_composite_id
@@ -20,7 +21,14 @@ from mydocs.extracting.models import (
     SplitClassifyResult,
     SplitSegment,
 )
-from mydocs.models import Document, DocumentPage, SubDocument, SubDocumentPageRef
+from mydocs.extracting.prompt_utils import calculate_content_hash
+from mydocs.models import (
+    Document,
+    DocumentPage,
+    SplitClassifyMeta,
+    SubDocument,
+    SubDocumentPageRef,
+)
 
 log = get_logger(__name__)
 
@@ -128,70 +136,135 @@ async def run_llm_split_classify(
 
 
 # ---------------------------------------------------------------------------
-# Overlap Merging
+# Overlap Merging (4-phase algorithm)
 # ---------------------------------------------------------------------------
+
+_PageTag = NamedTuple("_PageTag", [
+    ("document_type", str),
+    ("batch_idx", int),
+    ("segment_idx", int),
+])
+
+
+def _centrality_score(page_num: int, batch_pages: list[DocumentPage]) -> float:
+    """Score how central a page is within its batch (higher = more central).
+
+    Returns a value in [0, 1] where 1 means perfectly centered.
+    """
+    page_numbers = sorted(p.page_number for p in batch_pages)
+    if len(page_numbers) <= 1:
+        return 1.0
+    idx = page_numbers.index(page_num)
+    mid = (len(page_numbers) - 1) / 2.0
+    return 1.0 - abs(idx - mid) / mid
+
 
 def combine_overlapping_results(
     batch_results: list[LLMSplitClassifyBatchResult],
     batches: list[list[DocumentPage]],
 ) -> list[SplitSegment]:
-    """Merge batch results, resolving overlapping page classifications.
+    """Merge batch results preserving within-batch segment boundaries.
 
-    For overlapping pages, the classification from the batch where the
-    page is more centrally positioned (not at the boundary) is preferred.
+    Uses a 4-phase algorithm:
+    1. Tag: record (document_type, batch_idx, segment_idx) for every page
+    2. Select: for pages in multiple batches, pick the most central tag
+    3. Build: walk sorted pages; new segment on tag change
+    4. Stitch: merge adjacent segments at batch boundaries if they share
+       the same origin in an overlapping batch
     """
-    # Build page_number → document_type mapping
-    page_classifications: dict[int, str] = {}
+    if not batch_results:
+        return []
+
+    # --- Phase 1: Tag pages ---
+    # page_num → list of (tag, centrality_score)
+    page_tags: dict[int, list[tuple[_PageTag, float]]] = {}
+    batch_page_sets = [
+        {p.page_number for p in batch_pages} for batch_pages in batches
+    ]
 
     for batch_idx, (batch_result, batch_pages) in enumerate(
         zip(batch_results, batches)
     ):
-        batch_page_numbers = {p.page_number for p in batch_pages}
-
-        for segment in batch_result.result:
+        for segment_idx, segment in enumerate(batch_result.result):
             for page_num in segment.page_numbers:
-                if page_num not in batch_page_numbers:
+                if page_num not in batch_page_sets[batch_idx]:
                     continue
+                tag = _PageTag(
+                    document_type=segment.document_type,
+                    batch_idx=batch_idx,
+                    segment_idx=segment_idx,
+                )
+                score = _centrality_score(page_num, batch_pages)
+                page_tags.setdefault(page_num, []).append((tag, score))
 
-                if page_num not in page_classifications:
-                    page_classifications[page_num] = segment.document_type
-                else:
-                    # Prefer classification from a batch where this page
-                    # is not at the boundary (more central position)
-                    batch_page_list = sorted(batch_page_numbers)
-                    if batch_page_list:
-                        mid = len(batch_page_list) // 2
-                        page_pos = batch_page_list.index(page_num) if page_num in batch_page_list else -1
-                        # If this page is in the middle half, prefer this classification
-                        if abs(page_pos - mid) < len(batch_page_list) // 4 + 1:
-                            page_classifications[page_num] = segment.document_type
-
-    # Convert to contiguous segments
-    if not page_classifications:
+    if not page_tags:
         return []
 
-    sorted_pages = sorted(page_classifications.keys())
-    segments: list[SplitSegment] = []
-    current_type = page_classifications[sorted_pages[0]]
+    # --- Phase 2: Select preferred tag per page ---
+    selected: dict[int, _PageTag] = {}
+    for page_num, tag_scores in page_tags.items():
+        # Pick the tag with the highest centrality score
+        best_tag, _ = max(tag_scores, key=lambda ts: ts[1])
+        selected[page_num] = best_tag
+
+    # --- Phase 3: Build segments (respecting tag boundaries) ---
+    sorted_pages = sorted(selected.keys())
+    raw_segments: list[tuple[_PageTag, list[int]]] = []
+    current_tag = selected[sorted_pages[0]]
     current_pages = [sorted_pages[0]]
 
     for page_num in sorted_pages[1:]:
-        if page_classifications[page_num] == current_type:
-            current_pages.append(page_num)
-        else:
-            segments.append(SplitSegment(
-                document_type=current_type,
-                page_numbers=current_pages,
-            ))
-            current_type = page_classifications[page_num]
+        tag = selected[page_num]
+        if (tag.document_type != current_tag.document_type
+                or tag.batch_idx != current_tag.batch_idx
+                or tag.segment_idx != current_tag.segment_idx):
+            raw_segments.append((current_tag, current_pages))
+            current_tag = tag
             current_pages = [page_num]
+        else:
+            current_pages.append(page_num)
 
-    segments.append(SplitSegment(
-        document_type=current_type,
-        page_numbers=current_pages,
-    ))
+    raw_segments.append((current_tag, current_pages))
 
-    return segments
+    # --- Phase 4: Cross-batch stitch ---
+    # Merge adjacent segments at batch boundaries only if they share the
+    # same (batch_idx, segment_idx) origin in an overlapping batch.
+    merged: list[tuple[_PageTag, list[int]]] = [raw_segments[0]]
+
+    for tag, pages in raw_segments[1:]:
+        prev_tag, prev_pages = merged[-1]
+
+        if tag.document_type != prev_tag.document_type:
+            merged.append((tag, pages))
+            continue
+
+        # Check if the boundary pages share a common tag in any batch
+        boundary_page = prev_pages[-1]
+        next_page = pages[0]
+        should_merge = False
+
+        boundary_tags = page_tags.get(boundary_page, [])
+        next_tags = page_tags.get(next_page, [])
+
+        for bt, _ in boundary_tags:
+            for nt, _ in next_tags:
+                if (bt.batch_idx == nt.batch_idx
+                        and bt.segment_idx == nt.segment_idx
+                        and bt.document_type == nt.document_type):
+                    should_merge = True
+                    break
+            if should_merge:
+                break
+
+        if should_merge:
+            merged[-1] = (prev_tag, prev_pages + pages)
+        else:
+            merged.append((tag, pages))
+
+    return [
+        SplitSegment(document_type=tag.document_type, page_numbers=pages)
+        for tag, pages in merged
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +320,7 @@ async def split_and_classify(
     prompt_config: PromptConfig,
     content_mode: ContentMode = ContentMode.MARKDOWN,
     case_type: str = "generic",
+    force: bool = False,
 ) -> SplitClassifyResult:
     """Split and classify a document into typed segments.
 
@@ -255,10 +329,46 @@ async def split_and_classify(
         prompt_config: Prompt configuration with batch_size and overlap_factor.
         content_mode: Which content representation to use.
         case_type: Case type for SubDocument creation.
+        force: If True, skip idempotency check and always re-run LLM calls.
 
     Returns:
         SplitClassifyResult with classified segments and persisted subdocuments.
     """
+    doc = await Document.aget(document_id)
+    if not doc:
+        log.warning(f"Document {document_id} not found")
+        return SplitClassifyResult(segments=[])
+
+    # Compute current hashes for idempotency
+    file_sha256 = doc.file_metadata.sha256 if doc.file_metadata else ""
+    config_hash = calculate_content_hash(
+        json.dumps(prompt_config.model_dump(), sort_keys=True)
+    )
+
+    # Idempotency check
+    if not force and doc.subdocuments and doc.split_classify_meta:
+        meta = doc.split_classify_meta
+        if (meta.file_sha256 == file_sha256
+                and meta.config_hash == config_hash
+                and meta.case_type == case_type):
+            log.info(
+                f"Document {document_id}: split-classify unchanged "
+                f"(file hash and config hash match), reusing "
+                f"{len(doc.subdocuments)} subdocuments"
+            )
+            segments = [
+                SplitSegment(
+                    document_type=sd.document_type,
+                    page_numbers=sorted(
+                        pr.page_number for pr in sd.page_refs
+                    ),
+                )
+                for sd in doc.subdocuments
+            ]
+            return SplitClassifyResult(
+                segments=segments, subdocuments=doc.subdocuments
+            )
+
     batch_size = prompt_config.batch_size or 12
     overlap_factor = prompt_config.overlap_factor or 3
 
@@ -295,13 +405,15 @@ async def split_and_classify(
 
     # Build and persist SubDocuments on the parent Document
     subdocuments = await _build_subdocuments(document_id, case_type, segments, pages)
-    if subdocuments:
-        doc = await Document.aget(document_id)
-        if doc:
-            doc.subdocuments = subdocuments
-            await doc.asave()
-            log.info(f"Persisted {len(subdocuments)} subdocuments on document {document_id}")
-        else:
-            log.warning(f"Document {document_id} not found, subdocuments not persisted")
+
+    doc.subdocuments = subdocuments
+    doc.split_classify_meta = SplitClassifyMeta(
+        file_sha256=file_sha256,
+        config_hash=config_hash,
+        case_type=case_type,
+        completed_at=datetime.now(timezone.utc),
+    )
+    await doc.asave()
+    log.info(f"Persisted {len(subdocuments)} subdocuments on document {document_id}")
 
     return SplitClassifyResult(segments=segments, subdocuments=subdocuments)

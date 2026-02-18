@@ -303,11 +303,25 @@ class SubDocument(BaseModel):
     created_at: Optional[datetime] = None
 ```
 
-The `Document` model gains a new optional field:
+#### SplitClassifyMeta
+
+Tracks input hashes from the last split-classify run for idempotency:
+
+```python
+class SplitClassifyMeta(BaseModel):
+    """Tracks inputs of the last split-classify run for idempotency."""
+    file_sha256: str          # doc.file_metadata.sha256 at time of classification
+    config_hash: str          # SHA256 of serialized PromptConfig
+    case_type: str            # case_type used
+    completed_at: datetime    # when classification completed
+```
+
+The `Document` model gains new optional fields:
 ```python
 class Document(MongoBaseModel):
     ...
     subdocuments: Optional[List[SubDocument]] = None
+    split_classify_meta: Optional[SplitClassifyMeta] = None
 ```
 
 ---
@@ -339,10 +353,27 @@ Splitting uses a batched approach for large documents:
 
 1. **Batch pages**: Divide document pages into batches of `batch_size` pages with `overlap_factor` page overlap between consecutive batches
 2. **Classify batches**: Send each batch to the LLM with the split/classify prompt
-3. **Merge results**: Combine batch results, resolving overlaps by preferring the batch where the boundary is more clearly visible
-4. **Persist sub-documents**: Resolve page numbers to page IDs, build `SubDocumentPageRef` and `SubDocument` objects with deterministic IDs (via `generate_composite_id`), and save them as embedded objects on the parent `Document`
+3. **Merge results**: Combine batch results using a 4-phase algorithm that preserves within-batch segment boundaries (see below)
+4. **Persist sub-documents**: Resolve page numbers to page IDs, build `SubDocumentPageRef` and `SubDocument` objects with deterministic IDs (via `generate_composite_id`), and save them as embedded objects on the parent `Document`. Also persist `SplitClassifyMeta` on the parent `Document` for idempotency.
 
 Split/classify is triggered directly by calling the split-classify endpoint or CLI command with a `case_type`. The split/classify prompt is loaded from `config/extracting/{case_type}/split_classify/prompts/{prompt_name}.yaml`. If no prompt exists, a `ConfigNotFoundError` is raised.
+
+#### Idempotency
+
+Split/classify supports hash-based staleness detection to avoid redundant LLM calls. Before running the LLM pipeline, the function checks two hashes:
+- **File content hash**: `doc.file_metadata.sha256` (computed during ingestion)
+- **Config hash**: SHA256 of the serialized `PromptConfig` (via `calculate_content_hash(json.dumps(prompt_config.model_dump(), sort_keys=True))`)
+
+If both hashes match the stored `SplitClassifyMeta` on the `Document` and `case_type` is unchanged, the existing subdocuments are returned without making LLM calls. A `force` parameter bypasses this check.
+
+#### Merge Algorithm (4-Phase)
+
+The merge algorithm resolves overlapping batch results while preserving within-batch segment boundaries:
+
+1. **Tag pages**: For each page, record `(document_type, batch_idx, segment_idx)` from every batch that classified it.
+2. **Select preferred tag**: For pages appearing in multiple batches, pick the tag from the batch where the page is most central (farthest from batch edges).
+3. **Build segments**: Walk sorted pages; start a new segment when `(batch_idx, segment_idx)` changes OR `document_type` changes. This preserves within-batch boundaries — e.g. 10 separate receipts remain 10 segments.
+4. **Cross-batch stitch**: For adjacent segments at batch boundaries with the same type and the same `(batch_idx, segment_idx)` origin in an overlapping batch, merge them. This correctly handles documents that span batch boundaries.
 
 ### 3.3 Split/Classify Prompt Config
 
@@ -366,6 +397,8 @@ user_prompt_template: |
 
 model: gpt-4.1
 ```
+
+**Prompt rules**: The system prompt MUST instruct the LLM to keep separate same-type documents as separate segments. For example, if a batch contains 5 receipts, the LLM must output 5 separate segments each with `document_type: "receipt"`, not one merged segment.
 
 ---
 

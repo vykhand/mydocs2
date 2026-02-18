@@ -29,8 +29,12 @@ sys_prompt_template: |
      - New headers, logos, or letterheads
      - Changes in formatting, language, or content topic
      - Explicit page breaks or separator pages
-  5. When uncertain, prefer keeping pages together rather than splitting.
+  5. When uncertain whether pages belong to the same document, prefer
+     keeping pages together.
   6. Use the "other" type only when no specific type fits.
+  7. Different documents of the same type MUST be separate segments.
+     For example, if you see 5 different receipts, output 5 separate
+     segments each with document_type "receipt", NOT one merged segment.
 
   ## Output Format
 
