@@ -839,6 +839,106 @@ Content-Type: application/json
 
 ---
 
+#### `POST /api/v1/sync/migrate/plan`
+
+Build a migration plan for cross-backend document migration (read-only).
+
+**Request body**:
+```json
+{
+    "source_backend": "local",
+    "target_backend": "azure_blob"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_backend` | string | **required** — Source storage backend (`local` or `azure_blob`) |
+| `target_backend` | string | **required** — Target storage backend (`local` or `azure_blob`) |
+
+```http
+POST http://localhost:8000/api/v1/sync/migrate/plan
+Content-Type: application/json
+
+{
+    "source_backend": "local",
+    "target_backend": "azure_blob"
+}
+```
+
+**Response** `200`:
+```json
+{
+    "items": [
+        {
+            "doc_id": "abc123",
+            "file_name": "abc123.pdf",
+            "source_path": "/data/managed/abc123.pdf",
+            "storage_mode": "managed",
+            "action": "copy",
+            "reason": "Copy file + sidecar from local to azure_blob"
+        }
+    ],
+    "summary": { "copy": 3, "copy_sidecar": 1, "skip_target": 2 },
+    "source_backend": "local",
+    "target_backend": "azure_blob",
+    "planned_at": "2026-02-19T10:00:00"
+}
+```
+
+---
+
+#### `POST /api/v1/sync/migrate/execute`
+
+Execute a cross-backend migration. This is a **storage-only** operation — no database writes. After migration, rebuild DB via `POST /api/v1/sync/execute`.
+
+**Request body**:
+```json
+{
+    "source_backend": "local",
+    "target_backend": "azure_blob",
+    "delete_source": false
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `source_backend` | string | — | **required** — Source storage backend |
+| `target_backend` | string | — | **required** — Target storage backend |
+| `delete_source` | bool | `false` | Delete source files after successful copy |
+
+```http
+POST http://localhost:8000/api/v1/sync/migrate/execute
+Content-Type: application/json
+
+{
+    "source_backend": "local",
+    "target_backend": "azure_blob"
+}
+```
+
+**Response** `200`:
+```json
+{
+    "items": [
+        {
+            "item": { "doc_id": "abc123", "action": "copy", ... },
+            "success": true,
+            "dest_path": "az://container/abc123.pdf",
+            "error": null
+        }
+    ],
+    "summary": { "copy": { "success": 3, "failed": 0 } },
+    "source_backend": "local",
+    "target_backend": "azure_blob",
+    "started_at": "2026-02-19T10:00:00",
+    "completed_at": "2026-02-19T10:00:15",
+    "delete_source": false
+}
+```
+
+---
+
 ## Error Handling
 
 All errors use a consistent JSON format:

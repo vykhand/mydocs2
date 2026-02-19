@@ -546,6 +546,39 @@ mydocs sync write-sidecars
 mydocs sync write-sidecars
 ```
 
+#### `mydocs sync migrate`
+
+Migrate documents between storage backends. Copies managed files and sidecars to the target backend. For external documents, only the sidecar JSON is copied (the source file stays in place).
+
+Migration is a **storage-only** operation — no database writes. After migration, rebuild the DB from the target backend:
+
+```
+mydocs sync migrate
+    --from local|azure_blob         # Source storage backend (required)
+    --to local|azure_blob           # Target storage backend (required)
+    --delete-source                 # Delete source files after successful copy
+    --dry-run                       # Show migration plan without executing
+```
+
+**Examples**:
+
+```bash
+# Preview what would be migrated
+mydocs sync migrate --from local --to azure_blob --dry-run
+
+# Migrate from local to Azure Blob Storage
+mydocs sync migrate --from local --to azure_blob
+
+# Migrate and clean up local source files
+mydocs sync migrate --from local --to azure_blob --delete-source
+
+# After migration, rebuild DB from target backend
+mydocs sync run --backend azure_blob
+
+# Reverse migration (Azure Blob → local)
+mydocs sync migrate --from azure_blob --to local
+```
+
 The `--output` flag is defined at the parent `sync` parser level with choices `json|table|quiet`, shared by all subcommands.
 
 **Implementation notes**: All sync subcommands call `build_sync_plan()` from `mydocs.sync.scanner` first, then `execute_sync_plan()` from `mydocs.sync.reconciler` for execution. The `write-sidecars` command is a shortcut that filters to only `sidecar_missing` actions.

@@ -57,6 +57,20 @@ class FileStorage(ABC):
         ...
 
     @abstractmethod
+    async def write_managed_bytes(self, doc_id: str, file_name: str, data: bytes) -> str:
+        """Write raw bytes to managed storage.
+
+        Args:
+            doc_id: Document ID.
+            file_name: Target file name (e.g. <doc_id>.<ext>).
+            data: Raw file bytes.
+
+        Returns:
+            Managed path of the written file.
+        """
+        ...
+
+    @abstractmethod
     async def delete_file(self, path: str) -> None:
         """Delete a file from storage."""
         ...

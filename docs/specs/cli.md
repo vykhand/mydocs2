@@ -232,6 +232,27 @@ mydocs sync run --reparse --dry-run
 mydocs sync write-sidecars
 ```
 
+#### `mydocs sync migrate`
+
+Migrate documents between storage backends. Copies managed files and sidecars to the target backend. For external documents, only the sidecar is copied. Migration is a storage-only operation — no database writes.
+
+```
+mydocs sync migrate
+    --from local|azure_blob         # Source storage backend (required)
+    --to local|azure_blob           # Target storage backend (required)
+    --delete-source                 # Delete source files after successful copy
+    --dry-run                       # Show migration plan without executing
+    --output json|table|quiet       # Output format (default: table)
+```
+
+**Examples**:
+```bash
+mydocs sync migrate --from local --to azure_blob --dry-run
+mydocs sync migrate --from local --to azure_blob
+mydocs sync migrate --from local --to azure_blob --delete-source
+mydocs sync migrate --from azure_blob --to local
+```
+
 ### 4.9 `mydocs cases`
 
 Case management subcommands.

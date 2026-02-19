@@ -101,14 +101,17 @@ async def ingest_files(
             continue
 
         if file_type not in SUPPORTED_FILE_TYPES:
-            # Record unsupported but known formats
+            # Record unsupported but known formats — compute hash for composite key
+            unsupported_metadata = await storage.get_file_metadata(str(file_path))
             doc = Document(
+                content_hash=unsupported_metadata.sha256,
                 file_name=file_path.name,
                 original_file_name=file_path.name,
                 file_type=file_type,
                 original_path=str(file_path.resolve()),
                 storage_mode=storage_mode,
                 storage_backend=backend,
+                file_metadata=unsupported_metadata,
                 status=DocumentStatusEnum.NOT_SUPPORTED,
                 tags=tags,
                 created_at=datetime.now(),
@@ -127,6 +130,7 @@ async def ingest_files(
 
         # Create Document first to get deterministic ID (from composite key)
         doc = Document(
+            content_hash=file_metadata.sha256,
             file_name=file_path.name,  # temporary, updated below for managed mode
             original_file_name=file_path.name,
             file_type=file_type,
@@ -138,7 +142,7 @@ async def ingest_files(
             tags=tags,
             created_at=datetime.now(),
         )
-        # doc.id is now computed from composite key [storage_backend, original_path]
+        # doc.id is now computed from composite key [original_path, content_hash]
 
         if storage_mode == StorageModeEnum.MANAGED:
             managed_path, managed_file_name = await storage.copy_to_managed(str(file_path), doc.id)

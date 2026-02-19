@@ -395,6 +395,64 @@ def format_split_classify_result(result, mode: str) -> None:
         print_table(headers, rows)
 
 
+def format_migrate_plan(plan, mode: str) -> None:
+    """Format and print a migration plan."""
+    if mode == "json":
+        print(plan.model_dump_json(indent=2))
+    elif mode == "quiet":
+        for action, count in sorted(plan.summary.items()):
+            print(f"{action}: {count}")
+    else:
+        if not plan.items:
+            print("No items in migration plan.")
+            return
+        headers = ["Action", "Doc ID", "File", "Mode", "Reason"]
+        rows = [
+            [
+                item.action.value,
+                item.doc_id[:12] + "...",
+                os.path.basename(item.file_name) if item.file_name else "-",
+                item.storage_mode,
+                item.reason[:60],
+            ]
+            for item in plan.items
+        ]
+        print_table(headers, rows)
+        print(f"\nSummary: {plan.summary}")
+        print(f"Migration: {plan.source_backend} -> {plan.target_backend}")
+
+
+def format_migrate_report(report, mode: str) -> None:
+    """Format and print a migration report."""
+    if mode == "json":
+        print(report.model_dump_json(indent=2))
+    elif mode == "quiet":
+        for action, counts in sorted(report.summary.items()):
+            print(f"{action}: success={counts['success']} failed={counts['failed']}")
+    else:
+        if not report.items:
+            print("No items migrated.")
+            return
+        headers = ["Action", "Doc ID", "Status", "Dest", "Error"]
+        rows = [
+            [
+                r.item.action.value,
+                r.item.doc_id[:12] + "...",
+                "OK" if r.success else "FAILED",
+                (r.dest_path or "-")[:40],
+                (r.error or "")[:40],
+            ]
+            for r in report.items
+        ]
+        print_table(headers, rows)
+        print(f"\nSummary: {report.summary}")
+        print(f"Migration: {report.source_backend} -> {report.target_backend}")
+        if report.delete_source:
+            print("Source files: deleted")
+        elapsed = (report.completed_at - report.started_at).total_seconds()
+        print(f"Duration: {elapsed:.1f}s")
+
+
 def format_config(serialized_config, mode: str) -> None:
     """Format and print configuration."""
     if mode == "json":

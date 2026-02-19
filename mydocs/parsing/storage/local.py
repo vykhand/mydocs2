@@ -77,6 +77,13 @@ class LocalFileStorage(FileStorage):
             crc32=format(crc32_value & 0xFFFFFFFF, '08x'),
         )
 
+    async def write_managed_bytes(self, doc_id: str, file_name: str, data: bytes) -> str:
+        """Write raw bytes to managed storage. Returns managed_path."""
+        path = os.path.join(self.managed_root, file_name)
+        async with aiofiles.open(path, "wb") as f:
+            await f.write(data)
+        return path
+
     async def delete_file(self, path: str) -> None:
         """Delete a file from local storage."""
         if os.path.isfile(path):

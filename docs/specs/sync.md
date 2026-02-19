@@ -57,6 +57,8 @@ class MetadataSidecar(BaseModel):
     sidecar_version: int = 1
 ```
 
+**Note on `content_hash`**: During restoration from sidecar, the `Document.content_hash` field is derived from `sidecar.file_metadata.sha256`. No additional field is needed in the sidecar model itself — `file_metadata.sha256` serves as the source of truth.
+
 ### 2.2 Sidecar File Format
 
 - **Filename**: `<doc_id>.metadata.json` (same convention as external mode sidecars)
@@ -127,6 +129,58 @@ class SyncItemResult(BaseModel):
     error: Optional[str] = None
 ```
 
+### 3.5 MigrateAction Enum
+
+```python
+class MigrateAction(StrEnum):
+    copy = "copy"                          # Managed: copy file + sidecar
+    copy_sidecar = "copy_sidecar"          # External: copy sidecar only
+    skip_already_on_target = "skip_target"  # Already on target backend
+    skip_no_managed_path = "skip_no_path"   # No managed_path to copy from
+```
+
+### 3.6 MigrateItem
+
+```python
+class MigrateItem(BaseModel):
+    doc_id: str
+    file_name: str
+    source_path: str              # current managed_path or sidecar path
+    storage_mode: str             # "managed" or "external"
+    action: MigrateAction
+    reason: str
+```
+
+### 3.7 MigratePlan
+
+```python
+class MigratePlan(BaseModel):
+    items: List[MigrateItem] = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
+    source_backend: str
+    target_backend: str
+    planned_at: datetime
+```
+
+### 3.8 MigrateReport
+
+```python
+class MigrateReport(BaseModel):
+    items: List[MigrateItemResult] = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
+    source_backend: str
+    target_backend: str
+    started_at: datetime
+    completed_at: datetime
+    delete_source: bool = False
+
+class MigrateItemResult(BaseModel):
+    item: MigrateItem
+    success: bool
+    dest_path: Optional[str] = None
+    error: Optional[str] = None
+```
+
 ---
 
 ## 4. Sync Algorithm
@@ -166,6 +220,36 @@ For each `SyncItem` in the plan:
 
 Return a `SyncReport` with per-item results (success/failure/error) and summary counts.
 
+### 4.4 Migrate Phase
+
+Cross-backend migration copies managed files and sidecars between storage backends. Migration is a **storage-only** operation — no database writes. After migration, the DB is rebuilt from the target backend's sidecars via `sync run --backend <target>`.
+
+Since the composite key no longer includes `storage_backend`, document IDs are preserved during migration.
+
+**`build_migrate_plan(source_backend, target_backend)`**:
+- Read DB to discover all documents (read-only)
+- Classify each:
+  - `copy`: managed mode + `storage_backend == source` → copy file + sidecar
+  - `copy_sidecar`: external mode + `storage_backend == source` → copy sidecar only
+  - `skip_already_on_target`: `storage_backend == target`
+  - `skip_no_managed_path`: managed mode but `managed_path` is None
+
+**`execute_migrate_plan(plan, source_storage, dest_storage, delete_source=False)`**:
+
+For `copy` items (managed docs):
+1. Download file from source storage
+2. Upload file to target storage via `write_managed_bytes()`
+3. Read sidecar from source, update `storage_backend` and `managed_path`, write to target
+4. If `delete_source`: delete file + sidecar from source (best-effort)
+
+For `copy_sidecar` items (external docs):
+1. Read sidecar from source (next to original file)
+2. Update `storage_backend` in sidecar data
+3. Write updated sidecar to target managed storage
+4. If `delete_source`: delete source sidecar (best-effort)
+
+Each item is wrapped in try/except — partial failures don't abort the batch. Re-running is idempotent: docs already on target are skipped.
+
 ---
 
 ## 5. CLI Commands
@@ -203,6 +287,19 @@ Write sidecars for all managed files that have DB records but no sidecars.
 mydocs sync write-sidecars
     --scan-path PATH            # Override managed storage path (default: data/managed/)
     --output json|table|quiet   # Output format (default: table)
+```
+
+### 5.4 `mydocs sync migrate`
+
+Migrate documents between storage backends.
+
+```
+mydocs sync migrate
+    --from local|azure_blob         # Source storage backend
+    --to local|azure_blob           # Target storage backend
+    --delete-source                 # Delete source files after successful copy
+    --dry-run                       # Show migration plan without executing
+    --output json|table|quiet       # Output format (default: table)
 ```
 
 ---
@@ -246,6 +343,29 @@ Response: {
 }
 ```
 
+### 6.4 Build Migrate Plan
+
+```
+POST /api/v1/sync/migrate/plan
+Body: {
+    "source_backend": "local",
+    "target_backend": "azure_blob"
+}
+Response: { ... MigratePlan model ... }
+```
+
+### 6.5 Execute Migrate
+
+```
+POST /api/v1/sync/migrate/execute
+Body: {
+    "source_backend": "local",
+    "target_backend": "azure_blob",
+    "delete_source": false
+}
+Response: { ... MigrateReport model ... }
+```
+
 ---
 
 ## 7. Package Structure
@@ -258,6 +378,7 @@ mydocs/
     sidecar.py          # write_sidecar(), read_sidecar()
     scanner.py          # scan_managed_storage(), scan_db_documents(), build_sync_plan()
     reconciler.py       # execute_sync_plan()
+    migrator.py         # build_migrate_plan(), execute_migrate_plan()
 ```
 
 ---
@@ -269,4 +390,5 @@ No additional dependencies. The sync module uses:
 - `mydocs.parsing.pipeline` — `parse_document()` for re-parsing
 - `mydocs.parsing.storage.local` — `LocalFileStorage` for file operations
 - `lightodm` — database operations (transitive)
+- `mydocs.parsing.storage` — storage factory and base class for migration
 - `aiofiles` — async file I/O (transitive)

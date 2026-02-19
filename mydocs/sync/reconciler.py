@@ -26,6 +26,7 @@ async def _restore_from_sidecar(
     sidecar = await read_sidecar(sidecar_path, storage)
 
     doc = Document(
+        content_hash=sidecar.file_metadata.sha256,
         file_name=sidecar.managed_path.split("/")[-1] if sidecar.managed_path else sidecar.original_file_name,
         original_file_name=sidecar.original_file_name,
         file_type=sidecar.file_type,

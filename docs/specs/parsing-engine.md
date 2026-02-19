@@ -226,6 +226,7 @@ Since one file = one document in mydocs, these are combined into a single model 
 ```python
 class Document(MongoBaseModel):
     # --- File-level fields ---
+    content_hash: str                                   # Mirrors file_metadata.sha256
     file_name: str                                      # Stem of the filename (no extension)
     original_file_name: str                             # Original filename with extension
     file_type: FileTypeEnum                             # Detected file type
@@ -254,12 +255,13 @@ class Document(MongoBaseModel):
 
     class Settings:
         name = "documents"
-        composite_key = ["storage_backend", "original_path"]
+        composite_key = ["original_path", "content_hash"]
 ```
 
-**ID Generation via composite key**: The `Settings.composite_key = ["storage_backend", "original_path"]` declaration causes `lightodm` to automatically compute the document `id` as `MD5(storage_backend + original_path)` on model instantiation. This means:
+**ID Generation via composite key**: The `Settings.composite_key = ["original_path", "content_hash"]` declaration causes `lightodm` to automatically compute the document `id` as `MD5(original_path + content_hash)` on model instantiation. The `content_hash` field mirrors `file_metadata.sha256` and decouples document identity from the storage backend, making cross-backend migration natural — the same document gets the same ID regardless of where it's stored. This means:
 - The same file imported twice produces the same document ID (upsert/dedup)
 - Re-ingestion of the same path is idempotent
+- Migration between storage backends preserves document IDs
 - No manual ID management is needed
 
 **Tags**: Documents can be tagged with arbitrary string labels. Tags support:
@@ -379,7 +381,7 @@ The polygon coordinates, combined with `DocumentPage.width`, `DocumentPage.heigh
 
 2. **Ingestion** (per file)
    - Compute file metadata (size, timestamps, SHA256 hash, etc.)
-   - Create `Document` instance -- the composite key auto-generates the ID from `(storage_backend, original_path)`, so duplicate imports are automatically handled via upsert
+   - Create `Document` instance -- the composite key auto-generates the ID from `(original_path, content_hash)`, so duplicate imports are automatically handled via upsert
    - **Managed mode**: Copy file to managed storage, record `managed_path`
    - **External mode**: Write sidecar metadata JSON, record `original_path`
    - Save document to database (upsert via `asave()`) with status `NEW`
@@ -560,7 +562,7 @@ No separate `pymongo` or `motor` dependencies are needed in the application -- t
 
 | Collection | Model | Composite Key | Description |
 |------------|-------|---------------|-------------|
-| `documents` | `Document` | `[storage_backend, original_path]` | Unified file + document records |
+| `documents` | `Document` | `[original_path, content_hash]` | Unified file + document records |
 | `pages` | `DocumentPage` | `[document_id, page_number]` | Individual page content and embeddings |
 
 ### 8.3 Standard Indexes

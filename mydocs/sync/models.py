@@ -41,3 +41,46 @@ class SyncReport(BaseModel):
     summary: dict = Field(default_factory=dict)
     started_at: datetime
     completed_at: datetime
+
+
+# --- Migration Models ---
+
+class MigrateAction(StrEnum):
+    copy = "copy"                          # Managed: copy file + sidecar
+    copy_sidecar = "copy_sidecar"          # External: copy sidecar only
+    skip_already_on_target = "skip_target"  # Already on target backend
+    skip_no_managed_path = "skip_no_path"   # No managed_path to copy from
+
+
+class MigrateItem(BaseModel):
+    doc_id: str
+    file_name: str
+    source_path: str              # current managed_path (or sidecar path for external)
+    storage_mode: str             # "managed" or "external"
+    action: MigrateAction
+    reason: str
+
+
+class MigratePlan(BaseModel):
+    items: List[MigrateItem] = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
+    source_backend: str
+    target_backend: str
+    planned_at: datetime
+
+
+class MigrateItemResult(BaseModel):
+    item: MigrateItem
+    success: bool
+    dest_path: Optional[str] = None
+    error: Optional[str] = None
+
+
+class MigrateReport(BaseModel):
+    items: List[MigrateItemResult] = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
+    source_backend: str
+    target_backend: str
+    started_at: datetime
+    completed_at: datetime
+    delete_source: bool = False

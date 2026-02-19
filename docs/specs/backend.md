@@ -495,6 +495,27 @@ Response: {
 }
 ```
 
+#### 3.16.4 Build Migrate Plan
+```
+POST /api/v1/sync/migrate/plan
+Body: {
+    "source_backend": "local",         // Required: source storage backend
+    "target_backend": "azure_blob"     // Required: target storage backend
+}
+Response: { ... MigratePlan model ... }
+```
+
+#### 3.16.5 Execute Migrate
+```
+POST /api/v1/sync/migrate/execute
+Body: {
+    "source_backend": "local",         // Required: source storage backend
+    "target_backend": "azure_blob",    // Required: target storage backend
+    "delete_source": false             // Optional: delete source files after copy
+}
+Response: { ... MigrateReport model ... }
+```
+
 ---
 
 ## 4. Database Architecture

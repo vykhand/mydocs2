@@ -160,6 +160,12 @@ class AzureBlobStorage(FileStorage):
                 crc32=format(crc32_value & 0xFFFFFFFF, '08x'),
             )
 
+    async def write_managed_bytes(self, doc_id: str, file_name: str, data: bytes) -> str:
+        """Write raw bytes to blob storage. Returns az:// URI."""
+        blob_client = self._container_client.get_blob_client(file_name)
+        await blob_client.upload_blob(data, overwrite=True)
+        return make_az_uri(self.container_name, file_name)
+
     async def delete_file(self, path: str) -> None:
         """Delete a blob from storage."""
         if path.startswith("az://"):

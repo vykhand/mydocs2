@@ -153,6 +153,7 @@ class MetadataSidecar(BaseModel):
 
 class Document(MongoBaseModel):
     # File-level fields
+    content_hash: str                                   # == file_metadata.sha256, used for composite key
     file_name: str                                      # Managed: <unique_id>.<ext>, External: original name
     original_file_name: str                             # Always the original file name
     file_type: FileTypeEnum
@@ -183,7 +184,7 @@ class Document(MongoBaseModel):
 
     class Settings:
         name = "documents"
-        composite_key = ["storage_backend", "original_path"]
+        composite_key = ["original_path", "content_hash"]
 
 
 class DocumentPage(MongoBaseModel):
