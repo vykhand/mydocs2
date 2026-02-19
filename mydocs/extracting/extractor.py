@@ -19,7 +19,12 @@ from mydocs.extracting.context import (
     get_context,
     get_prompt_input,
 )
-from mydocs.extracting.enrichment import enrich_field_results
+from mydocs.extracting.enrichment import (
+    _detect_composite_items,
+    _extract_parent_name,
+    enrich_composite_field_results,
+    enrich_field_results,
+)
 from mydocs.extracting.models import (
     ContentMode,
     ExtractionMode,
@@ -172,6 +177,7 @@ class BaseExtractor:
 
         # Step 2: Execute groups in parallel via LangGraph
         all_field_results: dict[str, FieldResult] = {}
+        all_composite_results: dict[str, list[dict[str, FieldResult]]] = {}
         model_used = "unknown"
 
         for group_id, fields in field_groups.items():
@@ -191,18 +197,28 @@ class BaseExtractor:
 
             group_result = await self._run_group(group_state)
             all_field_results.update(group_result.field_results)
+            for k, v in group_result.composite_results.items():
+                all_composite_results.setdefault(k, []).extend(v)
 
         # Step 3: Combine results
         results_dict = {
             name: result.model_dump() for name, result in all_field_results.items()
         }
+        # Serialize composite results into results_dict
+        for parent_name, items in all_composite_results.items():
+            results_dict[parent_name] = [
+                {k: v.model_dump() for k, v in item.items()}
+                for item in items
+            ]
 
         # Step 5: Save results and target object
         target_object_id = None
         if self.request.document_ids:
             for doc_id in self.request.document_ids:
                 await self._save_results(doc_id, all_field_results)
-                tid = await self._save_target_object(doc_id, all_field_results)
+                tid = await self._save_target_object(
+                    doc_id, all_field_results, all_composite_results
+                )
                 if tid:
                     target_object_id = tid
 
@@ -298,6 +314,18 @@ class BaseExtractor:
                 group_state.reference_granularity,
                 prompt_config.model,
             )
+            group_state.field_results = field_results
+            return SubgraphOutput(field_results=field_results)
+        elif _detect_composite_items(llm_result):
+            parent_name = _extract_parent_name(group_state.fields)
+            composite_results = await enrich_composite_field_results(
+                llm_result.result,
+                doc_short_to_long,
+                group_state.reference_granularity,
+                prompt_config.model,
+                parent_name,
+            )
+            return SubgraphOutput(composite_results=composite_results)
         else:
             # Direct mode or custom schema — store raw result
             field_results = {}
@@ -307,9 +335,8 @@ class BaseExtractor:
                         content=json.dumps(item.model_dump() if hasattr(item, "model_dump") else item),
                         created_by=prompt_config.model,
                     )
-
-        group_state.field_results = field_results
-        return SubgraphOutput(field_results=field_results)
+            group_state.field_results = field_results
+            return SubgraphOutput(field_results=field_results)
 
     async def _call_llm(
         self,
@@ -380,6 +407,7 @@ class BaseExtractor:
         self,
         document_id: str,
         field_results: dict[str, FieldResult],
+        composite_results: dict[str, list[dict[str, FieldResult]]] | None = None,
     ) -> str | None:
         """Save a target object if one is registered for this (case_type, document_type)."""
         target_cls = get_target_object_class(self.case_type, self.document_type)
@@ -393,7 +421,7 @@ class BaseExtractor:
             subdocument_id=subdocument_id,
             case_id=self.request.case_id or "",
         )
-        populate_target_object(target_obj, field_results)
+        populate_target_object(target_obj, field_results, composite_results)
         await target_obj.asave()
 
         target_id = str(target_obj.id)

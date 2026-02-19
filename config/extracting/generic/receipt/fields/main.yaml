@@ -1,0 +1,95 @@
+- name: summary
+  description: A concise summary of the receipt contents
+  data_type: text
+  prompt: >
+    Provide a concise summary of this receipt, including the merchant name,
+    date, and total amount.
+  group: 0
+
+- name: merchant_name
+  description: Name of the merchant or store
+  data_type: string
+  prompt: >
+    Extract the name of the merchant, store, or business that issued this receipt.
+  group: 0
+
+- name: merchant_address
+  description: Address of the merchant or store
+  data_type: text
+  prompt: >
+    Extract the full address of the merchant or store, including street,
+    city, and postal code if available.
+  group: 0
+
+- name: receipt_number
+  description: Receipt or transaction number
+  data_type: string
+  prompt: >
+    Extract the receipt number, invoice number, or transaction number.
+    Look for labels like "Receipt #", "Invoice #", "Trans #", "Račun", etc.
+  group: 0
+
+- name: transaction_date
+  description: Date of the transaction
+  data_type: date
+  prompt: >
+    Extract the transaction date. Return in ISO format 'yyyy-MM-dd'.
+    Look for the date near the top of the receipt.
+  group: 0
+
+- name: payment_method
+  description: Method of payment used
+  data_type: enum
+  prompt: >
+    Identify the payment method used for this transaction.
+  value_list:
+    - name: Cash
+      prompt: Cash payment including change given
+    - name: Credit Card
+      prompt: Credit card payment (Visa, Mastercard, etc.)
+    - name: Debit Card
+      prompt: Debit card or bank card payment
+    - name: Mobile Payment
+      prompt: Mobile payment (Apple Pay, Google Pay, etc.)
+    - name: Other
+      prompt: Any other payment method
+  group: 0
+
+- name: country
+  description: Country where the transaction took place
+  data_type: string
+  prompt: >
+    Identify the country where this transaction took place based on
+    currency, language, address, or tax ID format.
+  group: 0
+
+- name: subtotal
+  description: Subtotal amount before tax
+  data_type: currency
+  prompt: >
+    Extract the subtotal amount before tax. Include the numeric value only.
+  group: 0
+
+- name: tax_total
+  description: Total tax amount
+  data_type: currency
+  prompt: >
+    Extract the total tax amount (VAT, sales tax, DDV, etc.).
+    Include the numeric value only.
+  group: 0
+
+- name: total_amount
+  description: Total amount of the receipt
+  data_type: currency
+  prompt: >
+    Extract the final total amount of the receipt (after tax).
+    Include the numeric value only.
+  group: 0
+
+- name: currency
+  description: Currency of the transaction
+  data_type: string
+  prompt: >
+    Identify the currency used in this receipt (e.g., EUR, USD, GBP).
+    Return the ISO 4217 currency code.
+  group: 0

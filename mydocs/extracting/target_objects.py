@@ -64,15 +64,33 @@ def coerce_field_result(field_result: FieldResult, target_type: Any) -> Any:
     return value
 
 
+def _get_list_item_type(annotation: Any) -> Any:
+    """Unwrap Optional[list[X]] to X.
+
+    Returns X if annotation matches Optional[list[X]], else None.
+    """
+    inner = get_inner_type(annotation)
+    origin = get_origin(inner)
+    if origin is list:
+        args = get_args(inner)
+        if args:
+            return args[0]
+    return None
+
+
 def populate_target_object(
     target_obj: Any,
     field_results: dict[str, FieldResult],
+    composite_results: dict[str, list[dict[str, FieldResult]]] | None = None,
 ) -> None:
     """Populate a target object's fields from extraction results.
 
     Iterates over the target model's fields (excluding internal fields like
     id, document_id, subdocument_id, case_id), matches them by name against
     field_results, and coerces values to the declared field type.
+
+    For composite results (e.g., line items), converts each item dict to
+    the appropriate model type and sets the list on the target object.
     """
     skip_fields = {"id", "document_id", "subdocument_id", "case_id"}
     model_fields = target_obj.model_fields
@@ -90,3 +108,14 @@ def populate_target_object(
 
         if coerced is not None:
             setattr(target_obj, field_name, coerced)
+
+    if not composite_results:
+        return
+
+    for field_name, items in composite_results.items():
+        if field_name in skip_fields or field_name not in model_fields:
+            continue
+        item_type = _get_list_item_type(model_fields[field_name].annotation)
+        if item_type:
+            instances = [item_type(**item) for item in items]
+            setattr(target_obj, field_name, instances)

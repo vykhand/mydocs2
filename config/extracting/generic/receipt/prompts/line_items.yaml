@@ -1,0 +1,49 @@
+name: receipt_line_items
+document_type: receipt
+groups: [1]
+output_schema: receipt_line_items
+
+sys_prompt_template: |
+  You are a document analysis assistant specializing in extracting line items from receipts.
+  Extract ALL individual purchased items from the receipt.
+
+  {FIELD_SCHEMA}
+
+  For each line item, extract:
+  - item_description: the name or description of the item
+  - quantity: the quantity purchased (default to "1" if not explicitly stated)
+  - unit_price: the price per unit
+  - line_total: the total price for this line item
+
+  For each sub-field, provide:
+  - content: the extracted value (empty string if not found)
+  - justification: why you chose this value
+  - citation: exact text from the document that supports your answer
+  - references: element references in format d{id}:{page}:{element_id}
+
+  IMPORTANT:
+  - Extract ONLY actual purchased items as line items
+  - DO NOT include subtotals, taxes, totals, discounts, or payment information as line items
+  - If a quantity is not explicitly shown, assume "1"
+  - For currency amounts, extract only the numeric value
+
+user_prompt_template: |
+  Fields to extract:
+  {fields}
+
+  Receipt content:
+  {context}
+
+model: azure/gpt-4.1
+validation_retries: 3
+transport_retries: 3
+llm_kwargs:
+  temperature: 0.1
+  top_p: 0.1
+
+retriever_config:
+  name: pages_retriever
+  content_field: content_markdown
+
+content_mode: markdown
+reference_granularity: full

@@ -464,9 +464,19 @@ For each group of fields:
 - **Two-level retry strategy**:
   - **Transport retries** (`transport_retries`, passed to litellm as `num_retries`): Handles HTTP 429, 500, 503, connection errors, and timeouts. Managed internally by litellm with exponential backoff. Transport errors (`litellm.exceptions.APIError` and subclasses) are **not** retried by the outer loop since litellm has already exhausted its attempts.
   - **Validation retries** (`validation_retries`, outer loop): If the LLM returns valid JSON that fails Pydantic `model_validate_json()`, retry the full LLM call. This is rare with `json_schema` structured output mode but provides a safety net.
-- Parse response into `LLMFieldsResult` (or custom schema)
+- Parse response into `LLMFieldsResult` (or custom schema). See Step 2d′ for how the result type determines the enrichment path.
 
-**2e. Enrich Results**
+**2d′. Result Path Detection**
+
+After the LLM call, the engine detects one of three result paths:
+
+1. **`LLMFieldsResult`** → flat field enrichment (Step 2e)
+2. **Custom schema with `LLMFieldItem` sub-fields** → composite enrichment (Step 2e′)
+3. **Direct mode / other** → raw JSON storage
+
+Detection is automatic: if the result items have `LLMFieldItem`-typed fields, the composite path is taken.
+
+**2e. Enrich Results (Flat Fields)**
 - If `reference_granularity = "full"`:
   - Parse LLM reference strings (e.g., `"d1:3:p5"`, `"d2:1:t3:2"`)
   - Map short document IDs back to actual IDs
@@ -478,6 +488,12 @@ For each group of fields:
   - Build `PageReference` objects (no polygon resolution)
 - If `reference_granularity = "none"`:
   - Only extract the `content` value
+
+**2e′. Enrich Results (Composite Fields)**
+
+When a custom schema's items contain `LLMFieldItem` sub-fields (e.g., `LLMReceiptLineItem`), each sub-field is individually enriched with reference resolution — the same process as flat field enrichment (Step 2e). The parent field name is derived from dot-notation in the field definitions (e.g., `line_items.item_description` → parent `line_items`).
+
+Results are grouped by parent field name: `{parent_field_name: [item_dict_0, item_dict_1, ...]}` where each `item_dict` maps sub-field names to `FieldResult` objects.
 
 #### Step 3: Combine Results
 
@@ -812,6 +828,8 @@ def get_target_object_class(case_type: str, document_type: str) -> Optional[type
 
 Target object fields can be `FieldResult` or plain types (`str`, `int`, `float`, `bool`). If extraction produces a `FieldResult` but the target field expects a plain type, the value is coerced via `.content` (e.g., `FieldResult.content` → `str`, `int(FieldResult.content)` → `int`).
 
+**Composite field population**: When a target object has `list[CompositeModel]` fields (e.g., `line_items: Optional[list[ReceiptLineItem]]`), composite extraction results are converted to model instances and set on the target object. The item type is inferred from the field's type annotation by unwrapping `Optional[list[X]]` → `X`.
+
 Target objects live in the `case_types/` subpackage (see Section 13). Each case type's `__init__.py` registers its target objects on import.
 
 ---
@@ -845,6 +863,8 @@ All directory names are lowercase. Case types and document types can be any valu
 **Config fallback**: If a config is not found under `{case_type}/{document_type}/`, the engine falls back to `generic/{document_type}/`.
 
 ### 9.2 Field Definition YAML
+
+**Dot-notation naming convention**: Composite fields use dot-notation `{parent_field}.{sub_field}` (e.g., `line_items.item_description`). The parent name is used to group sub-fields and to match the target object's composite field. All composite sub-fields must share the same group number and use a prompt config with a custom output schema.
 
 ```yaml
 # config/extracting/generic/claim/fields/claim.yaml
@@ -1016,6 +1036,16 @@ When `infer_references = True`, the reference-inference pass produces `FieldRefe
 
 This flat list of references supports arbitrary nesting depth — each leaf field in the result gets a path-addressable reference annotation.
 
+### 11.2.1 Composite Enrichment and Target Object Population
+
+When using referenced-mode custom schemas with `LLMFieldItem` sub-fields:
+
+1. **Detection**: The engine automatically detects that result items have `LLMFieldItem` sub-fields (via `_detect_composite_items()`)
+2. **Parent name extraction**: The parent field name is derived from dot-notation field definitions (e.g., `line_items.item_description` → `line_items`)
+3. **Per-sub-field enrichment**: Each `LLMFieldItem` sub-field is enriched individually — references are resolved according to `reference_granularity`, producing `FieldResult` objects
+4. **Result structure**: Composite results are stored as `{parent_name: [item_dict_0, item_dict_1, ...]}` where each `item_dict` maps sub-field names to `FieldResult`
+5. **Target object population**: If the target object has a `list[CompositeModel]` field matching the parent name, each item dict is converted to a model instance. The item type is inferred from the annotation (`Optional[list[X]]` → `X`).
+
 ### 11.3 Registering the Schema
 
 ```python
@@ -1118,10 +1148,12 @@ mydocs/
     target_objects.py           # Type coercion and target object population
     schemas/                    # Custom output schemas
       __init__.py
+      receipt.py                # LLMReceiptLineItem, LLMReceiptLineItemsResult
     case_types/                 # Case-type subpackages with target objects
       __init__.py               # Imports all case_type packages to trigger registration
       generic/
-        __init__.py             # Minimal (no target objects for generic)
+        __init__.py             # Registers Receipt target object
+        models.py               # Receipt, ReceiptLineItem
       {case_type}/              # Domain-specific case types (e.g., insurance/)
         __init__.py             # Registers target objects on import
         models.py               # MongoBaseModel subclasses for target objects

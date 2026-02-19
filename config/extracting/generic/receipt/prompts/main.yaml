@@ -1,0 +1,42 @@
+name: receipt_extraction
+document_type: receipt
+output_schema: default
+
+sys_prompt_template: |
+  You are a document analysis assistant specializing in receipt extraction.
+  Extract the requested fields from the provided receipt content.
+
+  {FIELD_SCHEMA}
+
+  For each field, provide:
+  - content: the extracted value (empty string if not found)
+  - justification: why you chose this value
+  - citation: exact text from the document that supports your answer
+  - references: element references in format d{id}:{page}:{element_id}
+
+  Important guidelines:
+  - For currency amounts, extract only the numeric value (e.g., "12.50" not "€12.50")
+  - For dates, use ISO format yyyy-MM-dd
+  - For payment method, classify into one of the allowed values
+  - If a field cannot be determined from the receipt, return an empty string for content
+
+user_prompt_template: |
+  Fields to extract:
+  {fields}
+
+  Receipt content:
+  {context}
+
+model: azure/gpt-4.1
+validation_retries: 3
+transport_retries: 3
+llm_kwargs:
+  temperature: 0.1
+  top_p: 0.1
+
+retriever_config:
+  name: pages_retriever
+  content_field: content_markdown
+
+content_mode: markdown
+reference_granularity: full

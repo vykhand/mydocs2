@@ -1,0 +1,28 @@
+- name: line_items.item_description
+  description: Description or name of the purchased item
+  data_type: string
+  prompt: >
+    Extract the item name or description for this line item.
+  group: 1
+
+- name: line_items.quantity
+  description: Quantity purchased
+  data_type: number
+  prompt: >
+    Extract the quantity purchased. Return as a number.
+  group: 1
+
+- name: line_items.unit_price
+  description: Price per unit
+  data_type: currency
+  prompt: >
+    Extract the unit price for this item. Include the numeric value only.
+  group: 1
+
+- name: line_items.line_total
+  description: Total price for this line item
+  data_type: currency
+  prompt: >
+    Extract the total price for this line item (quantity x unit price).
+    Include the numeric value only.
+  group: 1

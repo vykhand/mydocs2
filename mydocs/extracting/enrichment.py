@@ -5,8 +5,9 @@ and builds enriched FieldResult objects from raw LLM output.
 """
 
 import re
+import typing
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional, get_args, get_origin
 
 from tinystructlog import get_logger
 
@@ -20,6 +21,17 @@ from mydocs.extracting.models import (
 from mydocs.models import Document, DocumentPage
 
 log = get_logger(__name__)
+
+
+def get_inner_type(annotation: Any) -> Any:
+    """Unwrap Optional[X] to X."""
+    origin = get_origin(annotation)
+    if origin is typing.Union:
+        args = get_args(annotation)
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return non_none[0]
+    return annotation
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +278,102 @@ def llm_field_to_result(
 # ---------------------------------------------------------------------------
 # Batch Enrichment
 # ---------------------------------------------------------------------------
+
+def _detect_composite_items(llm_result) -> bool:
+    """Check if llm_result.result items have LLMFieldItem sub-fields."""
+    if not hasattr(llm_result, "result") or not isinstance(llm_result.result, list):
+        return False
+    if not llm_result.result:
+        return False
+    item = llm_result.result[0]
+    if not hasattr(item, "model_fields"):
+        return False
+    for field_info in item.model_fields.values():
+        inner = get_inner_type(field_info.annotation) if field_info.annotation else None
+        if inner is LLMFieldItem:
+            return True
+    return False
+
+
+def _extract_parent_name(fields: list) -> str:
+    """Extract composite parent name from dot-notation field names.
+
+    E.g., fields with names like 'line_items.item_description' → 'line_items'.
+    """
+    for field in fields:
+        name = field.name if hasattr(field, "name") else str(field)
+        if "." in name:
+            return name.split(".")[0]
+    return "items"
+
+
+async def enrich_composite_field_results(
+    items: list,
+    doc_short_to_long: dict[str, str],
+    reference_granularity: ReferenceGranularity,
+    model_name: str,
+    parent_field_name: str,
+) -> dict[str, list[dict[str, FieldResult]]]:
+    """Enrich composite schema items that have LLMFieldItem sub-fields.
+
+    For each item in the list, iterates its fields. For each LLMFieldItem
+    sub-field, resolves references using the same helpers as flat enrichment.
+
+    Returns {parent_field_name: [item_dict_0, item_dict_1, ...]}
+    where each item_dict maps sub-field names to FieldResult.
+    """
+    if reference_granularity == ReferenceGranularity.NONE:
+        result_items = []
+        for item in items:
+            item_dict: dict[str, FieldResult] = {}
+            for field_name in item.model_fields:
+                value = getattr(item, field_name, None)
+                if isinstance(value, LLMFieldItem):
+                    item_dict[field_name] = llm_field_to_result(value, model_name)
+            result_items.append(item_dict)
+        return {parent_field_name: result_items}
+
+    # Pre-fetch documents for reference resolution
+    all_doc_ids = list(set(doc_short_to_long.values()))
+    documents = await fetch_document_elements(all_doc_ids) if all_doc_ids else {}
+
+    result_items = []
+    for item in items:
+        item_dict: dict[str, FieldResult] = {}
+        for field_name in item.model_fields:
+            value = getattr(item, field_name, None)
+            if not isinstance(value, LLMFieldItem):
+                continue
+
+            resolved_refs: Optional[list[Reference]] = None
+            resolved_page_refs: Optional[list[PageReference]] = None
+
+            if value.references:
+                if reference_granularity == ReferenceGranularity.FULL:
+                    resolved_refs = []
+                    for ref_str in value.references:
+                        ref = await resolve_reference(ref_str, doc_short_to_long, documents)
+                        if ref:
+                            resolved_refs.append(ref)
+
+                elif reference_granularity == ReferenceGranularity.PAGE:
+                    resolved_page_refs = []
+                    seen_pages: set[tuple[str, int]] = set()
+                    for ref_str in value.references:
+                        page_ref = await resolve_page_reference(ref_str, doc_short_to_long)
+                        if page_ref:
+                            key = (page_ref.document_id, page_ref.page_number)
+                            if key not in seen_pages:
+                                seen_pages.add(key)
+                                resolved_page_refs.append(page_ref)
+
+            item_dict[field_name] = llm_field_to_result(
+                value, model_name, resolved_refs, resolved_page_refs
+            )
+        result_items.append(item_dict)
+
+    return {parent_field_name: result_items}
+
 
 async def enrich_field_results(
     llm_result: list[LLMFieldItem],

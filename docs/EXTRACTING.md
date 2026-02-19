@@ -66,7 +66,7 @@ All enumerations, field definitions, result models, request/response types, Mong
 | `RetrieverConfig`, `PromptConfig` | Implemented as specified |
 | `FieldPrompt`, `FieldInput`, `PromptInput` | **Code-only** — pipeline-internal models not described in the spec |
 | `RetrieverFilter` | Implemented as specified |
-| `SubgraphOutput`, `ExtractGroupState`, `ExtractorState` | **Code-only** — LangGraph state models. `ExtractorState` includes `subdocument_id` |
+| `SubgraphOutput`, `ExtractGroupState`, `ExtractorState` | **Code-only** — LangGraph state models. `ExtractorState` includes `subdocument_id`. `SubgraphOutput` includes `composite_results` for composite field extraction. |
 
 **`mydocs/models.py`** (canonical models) now includes:
 
@@ -103,7 +103,10 @@ The `BaseExtractor` class accepts an `ExtractionRequest` and drives the full pip
 3. Builds context string with `get_context()`
 4. Formats field prompts, fills template placeholders (`{fields}`, `{context}`, `{FIELD_SCHEMA}`)
 5. Calls `_call_llm()` with structured output schema
-6. Enriches results (referenced mode) or wraps raw results (direct/custom mode)
+6. Three-path enrichment logic:
+   - **`LLMFieldsResult`** → flat enrichment via `enrich_field_results()`
+   - **Custom schema with `LLMFieldItem` sub-fields** → composite enrichment via `enrich_composite_field_results()` (detected by `_detect_composite_items()`)
+   - **Other** → raw JSON storage (direct mode fallback)
 
 **`_call_llm()`** (line 271):
 - Uses `litellm.acompletion()` with `response_format=output_schema`
@@ -152,6 +155,12 @@ Returns `(context_string, doc_short_to_long)` where the mapping converts short I
 - `none`: Wraps items as `FieldResult` with content only
 - `page`: Resolves `PageReference` objects, deduplicates by `(document_id, page_number)`
 - `full`: Resolves full `Reference` objects with polygon data, pre-fetches documents
+
+**`enrich_composite_field_results(items, doc_short_to_long, reference_granularity, model_name, parent_field_name)`**: Enrichment for composite schema items (e.g., `LLMReceiptLineItem`). For each item, iterates its `LLMFieldItem` sub-fields and resolves references using the same helpers as flat enrichment. Returns `{parent_field_name: [item_dict_0, ...]}` where each `item_dict` maps sub-field names to `FieldResult`.
+
+**`_detect_composite_items(llm_result)`**: Checks if `llm_result.result` items have `LLMFieldItem` sub-fields. Used by the extractor to select the enrichment path.
+
+**`_extract_parent_name(fields)`**: Extracts the composite parent name from dot-notation field names (e.g., `line_items.item_description` → `line_items`).
 
 ### `retrievers.py` — Context Retrieval
 
@@ -244,7 +253,9 @@ ExtractionError (base)
 - `FieldResult` → `float`: `float(.content)`
 - `FieldResult` → `bool`: boolean evaluation of `.content`
 
-**`populate_target_object(target_obj, field_results)`**: Iterates over target model fields, matches by name against `field_results`, coerces values, and sets attributes. Skips internal fields (`id`, `document_id`, `subdocument_id`, `case_id`).
+**`_get_list_item_type(annotation)`**: Unwraps `Optional[list[X]]` to `X`. Returns `None` if annotation is not a list type.
+
+**`populate_target_object(target_obj, field_results, composite_results=None)`**: Iterates over target model fields, matches by name against `field_results`, coerces values, and sets attributes. Skips internal fields (`id`, `document_id`, `subdocument_id`, `case_id`). For composite results, converts each item dict to the appropriate model type (inferred via `_get_list_item_type()` from the field annotation) and sets the list on the target object.
 
 ### `case_types/` — Case Type Subpackages
 
@@ -254,7 +265,8 @@ Each case type has its own subpackage that registers target objects on import:
 case_types/
   __init__.py          # Imports all case_type packages
   generic/
-    __init__.py        # No target objects for generic
+    __init__.py        # Registers Receipt target object
+    models.py          # Receipt, ReceiptLineItem
 ```
 
 To add a new case type (e.g., `insurance`):
@@ -266,7 +278,9 @@ The `extracting/__init__.py` imports `case_types` alongside `retrievers` to trig
 
 ### `schemas/` — Custom Output Schemas
 
-Empty `__init__.py`. No custom schemas are registered. The spec describes example schemas like `LLMLineItemsResult` for invoice line items, but none are implemented.
+Contains custom output schemas for structured extraction:
+
+- **`receipt.py`**: `LLMReceiptLineItem` (composite model with `LLMFieldItem` sub-fields for item_description, quantity, unit_price, line_total) and `LLMReceiptLineItemsResult` (container). Registered as `receipt_line_items` in the schema registry.
 
 ---
 
@@ -283,6 +297,13 @@ config/
           main.yaml            # Default field definitions
         prompts/
           main.yaml            # Default prompt config
+      receipt/
+        fields/
+          main.yaml            # 11 header fields (group 0)
+          line_items.yaml      # 4 line item fields (group 1, dot-notation)
+        prompts/
+          main.yaml            # Group 0 prompt (default schema)
+          line_items.yaml      # Group 1 prompt (receipt_line_items schema)
       split_classify/
         prompts/
     {other_case_type}/         # Future case types follow same pattern
@@ -317,7 +338,7 @@ One field defined: `summary` (data_type: `text`, group: `0`) — extracts a conc
 | Group execution | Parallel via LangGraph `Send()` | Sequential `for` loop | Performance (no parallelism) |
 | LangGraph graph | Subgraph wired as `START → steps → END` | Steps called directly in `_run_group()` | Structural (works, but not graph-based) |
 | `DocumentTypeEnum` | StrEnum in models | Not implemented; plain strings | No type safety on document types |
-| Direct mode enrichment | Custom schema results as native dict | Stored as JSON-serialized `item_{i}` keys | API shape differs from spec |
+| Direct mode enrichment | Custom schema results as native dict | Stored as JSON-serialized `item_{i}` keys (for non-composite schemas) | API shape differs from spec for direct-mode schemas; composite schemas with `LLMFieldItem` sub-fields now properly enriched |
 | Reference inference | Second LLM pass for direct mode | Not implemented (models exist, logic missing) | Feature gap (explicitly out of scope) |
 | Config versioning | Hash + version tracking on YAML sync | Hash helpers exist, never called | Feature gap |
 | `config.py` module | `ExtractingConfig` YAML loading class | Does not exist; `prompt_utils.py` handles it | Naming difference |

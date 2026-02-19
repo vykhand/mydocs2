@@ -309,6 +309,7 @@ class RetrieverFilter(BaseModel):
 class SubgraphOutput(BaseModel):
     """Output from a single group subgraph execution."""
     field_results: dict[str, FieldResult] = Field(default_factory=dict)
+    composite_results: dict[str, list[dict[str, FieldResult]]] = Field(default_factory=dict)
 
 
 class ExtractGroupState(BaseModel):

@@ -7,11 +7,13 @@ from pydantic import BaseModel
 
 from mydocs.extracting.exceptions import RetrieverNotFoundError, SchemaNotFoundError
 from mydocs.extracting.models import LLMFieldsResult, LLMSplitClassifyBatchResult
+from mydocs.extracting.schemas.receipt import LLMReceiptLineItemsResult
 
 # Schema registry: maps schema names to Pydantic output models
 SCHEMAS: dict[str, type[BaseModel]] = {
     "default": LLMFieldsResult,
     "split_classify": LLMSplitClassifyBatchResult,
+    "receipt_line_items": LLMReceiptLineItemsResult,
 }
 
 # Retriever registry: maps retriever names to async functions
