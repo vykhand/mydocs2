@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from mydocs.backend.dependencies import (
     BatchParseRequest,
@@ -18,8 +18,9 @@ from mydocs.backend.dependencies import (
     TagsRequest,
 )
 from mydocs.parsing.base_parser import DocumentLockedException
-from mydocs.models import Document, DocumentPage, StorageModeEnum
+from mydocs.models import Document, DocumentPage, StorageBackendEnum, StorageModeEnum
 from mydocs.parsing.pipeline import batch_parse, ingest_files, parse_document
+from mydocs.parsing.storage import get_storage
 import mydocs.config as C
 
 router = APIRouter(prefix="/api/v1/documents")
@@ -145,6 +146,7 @@ async def ingest(request: IngestRequest):
         storage_mode=request.storage_mode,
         tags=request.tags,
         recursive=request.recursive,
+        storage_backend=request.storage_backend,
     )
     return IngestResponse(
         documents=[
@@ -198,6 +200,16 @@ async def get_document_file(document_id: str):
         return _error(404, "DOCUMENT_NOT_FOUND", f"Document {document_id} not found")
 
     file_path = doc.managed_path or doc.original_path
+
+    # Azure Blob: redirect to SAS URL
+    if doc.storage_backend == StorageBackendEnum.AZURE_BLOB and file_path:
+        storage = get_storage(StorageBackendEnum.AZURE_BLOB)
+        sas_url = await storage.generate_download_url(file_path)
+        if sas_url:
+            return RedirectResponse(url=sas_url, status_code=307)
+        return _error(500, "SAS_GENERATION_FAILED", "Failed to generate download URL")
+
+    # Local: serve file directly
     if not file_path or not os.path.isfile(file_path):
         return _error(404, "FILE_NOT_FOUND", f"File not found for document {document_id}")
 
@@ -263,9 +275,25 @@ async def delete_document(document_id: str):
     # Delete pages
     await DocumentPage.adelete_many({"document_id": document_id})
 
-    # Delete managed file if it exists
-    if doc.managed_path and os.path.isfile(doc.managed_path):
-        os.remove(doc.managed_path)
+    # Delete managed file and sidecar via storage backend
+    if doc.managed_path:
+        storage = get_storage(doc.storage_backend)
+        try:
+            await storage.delete_file(doc.managed_path)
+        except Exception:
+            pass  # Best-effort deletion
+        # Delete managed sidecar
+        try:
+            if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
+                from mydocs.parsing.storage.azure_blob import make_az_uri, parse_az_uri
+                container, _ = parse_az_uri(doc.managed_path)
+                sidecar_blob = make_az_uri(container, f"{doc.id}.metadata.json")
+                await storage.delete_file(sidecar_blob)
+            else:
+                sidecar_path = os.path.join(os.path.dirname(doc.managed_path), f"{doc.id}.metadata.json")
+                await storage.delete_file(sidecar_path)
+        except Exception:
+            pass  # Best-effort sidecar deletion
 
     # Delete sidecar metadata file for external mode (never delete the original file)
     if doc.storage_mode == StorageModeEnum.EXTERNAL and doc.original_path:

@@ -3,6 +3,7 @@
 import sys
 
 from mydocs.cli.formatters import format_sync_plan, format_sync_report
+from mydocs.models import StorageBackendEnum
 from mydocs.sync.models import SyncAction
 
 
@@ -14,12 +15,14 @@ def register(subparsers):
     status_parser = sub.add_parser("status", help="Scan and show sync plan (read-only)")
     status_parser.add_argument("--scan-path", default=None, help="Override managed storage path")
     status_parser.add_argument("--verify-content", action="store_true", help="Verify file content via SHA256")
+    status_parser.add_argument("--backend", choices=["local", "azure_blob"], default=None, help="Storage backend (default: from config)")
 
     # sync run
     run_parser = sub.add_parser("run", help="Execute sync plan")
     run_parser.add_argument("--scan-path", default=None, help="Override managed storage path")
     run_parser.add_argument("--verify-content", action="store_true", help="Verify file content via SHA256")
     run_parser.add_argument("--reparse", action="store_true", help="Re-parse documents with cache")
+    run_parser.add_argument("--backend", choices=["local", "azure_blob"], default=None, help="Storage backend (default: from config)")
     run_parser.add_argument(
         "--actions",
         default=None,
@@ -31,6 +34,7 @@ def register(subparsers):
     # sync write-sidecars
     ws_parser = sub.add_parser("write-sidecars", help="Write missing sidecars from DB records")
     ws_parser.add_argument("--scan-path", default=None, help="Override managed storage path")
+    ws_parser.add_argument("--backend", choices=["local", "azure_blob"], default=None, help="Storage backend (default: from config)")
 
     parser.add_argument(
         "--output",
@@ -59,9 +63,11 @@ async def handle(args):
 async def _handle_status(args, output):
     from mydocs.sync.scanner import build_sync_plan
 
+    backend = StorageBackendEnum(args.backend) if getattr(args, "backend", None) else None
     plan = await build_sync_plan(
         scan_path=args.scan_path,
         verify_content=args.verify_content,
+        storage_backend=backend,
     )
     format_sync_plan(plan, output)
 
@@ -70,9 +76,11 @@ async def _handle_run(args, output):
     from mydocs.sync.reconciler import execute_sync_plan
     from mydocs.sync.scanner import build_sync_plan
 
+    backend = StorageBackendEnum(args.backend) if getattr(args, "backend", None) else None
     plan = await build_sync_plan(
         scan_path=args.scan_path,
         verify_content=args.verify_content,
+        storage_backend=backend,
     )
 
     if args.dry_run:
@@ -92,7 +100,11 @@ async def _handle_write_sidecars(args, output):
     from mydocs.sync.reconciler import execute_sync_plan
     from mydocs.sync.scanner import build_sync_plan
 
-    plan = await build_sync_plan(scan_path=args.scan_path)
+    backend = StorageBackendEnum(args.backend) if getattr(args, "backend", None) else None
+    plan = await build_sync_plan(
+        scan_path=args.scan_path,
+        storage_backend=backend,
+    )
 
     report = await execute_sync_plan(
         plan=plan,

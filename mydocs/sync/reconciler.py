@@ -6,9 +6,10 @@ from datetime import datetime
 from tinystructlog import get_logger
 
 import mydocs.config as C
-from mydocs.models import Document, DocumentStatusEnum, MetadataSidecar
+from mydocs.models import Document, DocumentStatusEnum, MetadataSidecar, StorageBackendEnum
 from mydocs.parsing.pipeline import parse_document
-from mydocs.parsing.storage.local import LocalFileStorage
+from mydocs.parsing.storage import get_storage
+from mydocs.parsing.storage.base import FileStorage
 from mydocs.sync.models import SyncAction, SyncItemResult, SyncPlan, SyncReport
 from mydocs.sync.sidecar import build_sidecar_from_document, read_sidecar, write_sidecar
 
@@ -18,7 +19,7 @@ log = get_logger(__name__)
 async def _restore_from_sidecar(
     sidecar_path: str,
     file_path: str,
-    storage: LocalFileStorage,
+    storage: FileStorage,
     reparse: bool = False,
 ) -> None:
     """Restore a document from its sidecar and optionally reparse from cache."""
@@ -57,7 +58,7 @@ async def _restore_from_sidecar(
             raise
 
 
-async def _write_missing_sidecar(doc_id: str, storage: LocalFileStorage) -> None:
+async def _write_missing_sidecar(doc_id: str, storage: FileStorage) -> None:
     """Write a sidecar for a document that exists in DB but has no sidecar on disk."""
     doc = await Document.aget(doc_id)
     if not doc:
@@ -93,7 +94,8 @@ async def execute_sync_plan(
     started_at = datetime.now()
     results: list[SyncItemResult] = []
     managed_root = plan.scan_path
-    storage = LocalFileStorage(managed_root=managed_root)
+    backend = StorageBackendEnum(C.STORAGE_BACKEND)
+    storage = get_storage(backend, managed_root=managed_root) if backend == StorageBackendEnum.LOCAL else get_storage(backend)
 
     allowed_actions = set(actions) if actions else None
 

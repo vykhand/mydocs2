@@ -76,3 +76,29 @@ class LocalFileStorage(FileStorage):
             sha256=sha256_hash.hexdigest(),
             crc32=format(crc32_value & 0xFFFFFFFF, '08x'),
         )
+
+    async def delete_file(self, path: str) -> None:
+        """Delete a file from local storage."""
+        if os.path.isfile(path):
+            os.remove(path)
+
+    async def list_files(self, prefix: str | None = None) -> list[dict]:
+        """List files in managed storage root.
+
+        Returns:
+            List of dicts with keys: name, path, size_bytes.
+        """
+        results = []
+        for entry in os.listdir(self.managed_root):
+            if prefix and not entry.startswith(prefix):
+                continue
+            full_path = os.path.join(self.managed_root, entry)
+            if not os.path.isfile(full_path):
+                continue
+            stat = os.stat(full_path)
+            results.append({
+                "name": entry,
+                "path": full_path,
+                "size_bytes": stat.st_size,
+            })
+        return results

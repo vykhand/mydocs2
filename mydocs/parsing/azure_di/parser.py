@@ -9,16 +9,18 @@ from lightodm import generate_composite_id
 from tinystructlog import get_logger
 
 import mydocs.config as C
-from mydocs.parsing.azure_di.html import get_element_html
-from mydocs.parsing.azure_di.markdown import get_element_markdown
-from mydocs.parsing.base_parser import DocumentParser
-from mydocs.parsing.config import ParserConfig
 from mydocs.models import (
     Document,
     DocumentElement,
     DocumentElementTypeEnum,
     DocumentPage,
+    StorageBackendEnum,
 )
+from mydocs.parsing.azure_di.html import get_element_html
+from mydocs.parsing.azure_di.markdown import get_element_markdown
+from mydocs.parsing.base_parser import DocumentParser
+from mydocs.parsing.config import ParserConfig
+from mydocs.parsing.storage import get_storage
 
 log = get_logger(__name__)
 
@@ -31,6 +33,15 @@ class AzureDIDocumentParser(DocumentParser):
     def __init__(self, document: Document, parser_config: ParserConfig):
         super().__init__(document, parser_config)
         self._fpath = document.managed_path or document.original_path
+        self._storage = get_storage(document.storage_backend)
+        self._is_blob = document.storage_backend == StorageBackendEnum.AZURE_BLOB
+        # DI cache stays local for blob-backed files
+        if self._is_blob:
+            cache_dir = os.path.join(C.DATA_FOLDER, "cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            self._cache_path = os.path.join(cache_dir, f"{document.id}.di.json")
+        else:
+            self._cache_path = self._fpath + ".di.json"
         self.client = DocumentIntelligenceClient(
             endpoint=C.AZURE_DI_ENDPOINT,
             credential=AzureKeyCredential(C.AZURE_DI_API_KEY),
@@ -70,18 +81,19 @@ class AzureDIDocumentParser(DocumentParser):
 
     async def _aprocess_file(self, fpath: str) -> AnalyzeResult:
         """Send file to Azure DI or load from cache."""
-        log.info(f"Processing file: {os.path.basename(fpath)}.")
+        log.info(f"Processing file: {os.path.basename(fpath) if not fpath.startswith('az://') else fpath}.")
 
-        json_path = fpath + ".di.json"
+        json_path = self._cache_path
         if self.parser_config.use_cache and os.path.exists(json_path):
             with open(json_path, "r") as j:
                 log.info(f"Document intelligence cached results will be loaded from {json_path}")
                 result = AnalyzeResult(json.load(j))
         else:
             log.info(f"Parsing file {fpath} with Document Intelligence")
+            file_bytes = await self._storage.get_file_bytes(fpath)
             poller = await self.client.begin_analyze_document(
                 model_id=self.parser_config.azure_di_model,
-                body=open(fpath, "rb"),
+                body=file_bytes,
                 **self.parser_config.azure_di_kwargs,
             )
             result = await poller.result()
@@ -197,7 +209,8 @@ class AzureDIDocumentParser(DocumentParser):
     async def _embed_document(self):
         """Generate and store document-level embeddings using litellm."""
         for embedding in self.parser_config.document_embeddings:
-            cache_file_name = f"{self._fpath}.doc.{embedding.target_field}.json"
+            cache_base = self._cache_path.removesuffix(".di.json")
+            cache_file_name = f"{cache_base}.doc.{embedding.target_field}.json"
             if self.parser_config.use_cache and os.path.exists(cache_file_name):
                 log.info(f"Loading embeddings from cache: {cache_file_name}")
                 with open(cache_file_name, "r") as f:
@@ -224,7 +237,8 @@ class AzureDIDocumentParser(DocumentParser):
     async def _embed_pages(self):
         """Generate and store page-level embeddings using litellm."""
         for embedding in self.parser_config.page_embeddings:
-            cache_file_name = f"{self._fpath}.pages.{embedding.target_field}.json"
+            cache_base = self._cache_path.removesuffix(".di.json")
+            cache_file_name = f"{cache_base}.pages.{embedding.target_field}.json"
             if self.parser_config.use_cache and os.path.exists(cache_file_name):
                 log.info(f"Loading embeddings from cache: {cache_file_name}")
                 with open(cache_file_name, "r") as f:

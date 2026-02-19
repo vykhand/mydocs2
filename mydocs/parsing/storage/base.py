@@ -55,3 +55,21 @@ class FileStorage(ABC):
     async def get_file_metadata(self, path: str) -> FileMetadata:
         """Compute and return file metadata."""
         ...
+
+    @abstractmethod
+    async def delete_file(self, path: str) -> None:
+        """Delete a file from storage."""
+        ...
+
+    @abstractmethod
+    async def list_files(self, prefix: str | None = None) -> list[dict]:
+        """List files in managed storage.
+
+        Returns:
+            List of dicts with keys: name, path, size_bytes.
+        """
+        ...
+
+    async def generate_download_url(self, path: str, expiry_hours: int = 1) -> str | None:
+        """Generate a temporary download URL. Returns None if not supported (e.g. local)."""
+        return None

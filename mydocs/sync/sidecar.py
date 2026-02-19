@@ -1,7 +1,7 @@
 """Sidecar read/write utilities for sync."""
 
 from mydocs.models import Document, MetadataSidecar
-from mydocs.parsing.storage.local import LocalFileStorage
+from mydocs.parsing.storage.base import FileStorage
 
 
 def build_sidecar_from_document(doc: Document) -> MetadataSidecar:
@@ -24,7 +24,7 @@ def build_sidecar_from_document(doc: Document) -> MetadataSidecar:
     )
 
 
-async def write_sidecar(doc: Document, storage: LocalFileStorage) -> str:
+async def write_sidecar(doc: Document, storage: FileStorage) -> str:
     """Write a metadata sidecar for a document to managed storage.
 
     Returns:
@@ -35,7 +35,7 @@ async def write_sidecar(doc: Document, storage: LocalFileStorage) -> str:
     return await storage.write_managed_sidecar(doc.id, sidecar_data)
 
 
-async def read_sidecar(sidecar_path: str, storage: LocalFileStorage) -> MetadataSidecar:
+async def read_sidecar(sidecar_path: str, storage: FileStorage) -> MetadataSidecar:
     """Read and parse a metadata sidecar file.
 
     Returns:

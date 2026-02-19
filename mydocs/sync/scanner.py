@@ -7,9 +7,9 @@ from datetime import datetime
 from tinystructlog import get_logger
 
 import mydocs.config as C
-from mydocs.models import Document, MetadataSidecar
+from mydocs.models import Document, MetadataSidecar, StorageBackendEnum
 from mydocs.parsing.pipeline import EXTENSION_MAP
-from mydocs.parsing.storage.local import LocalFileStorage
+from mydocs.parsing.storage import get_storage
 from mydocs.sync.models import SyncAction, SyncItem, SyncPlan
 
 log = get_logger(__name__)
@@ -36,6 +36,7 @@ def _doc_id_from_filename(filename: str) -> str | None:
 
 async def scan_managed_storage(
     scan_path: str | None = None,
+    storage_backend: StorageBackendEnum | None = None,
 ) -> dict[str, dict]:
     """Scan managed storage for files and their sidecars.
 
@@ -45,13 +46,19 @@ async def scan_managed_storage(
             sidecar_path: str | None - path to the sidecar, if it exists
             sidecar: MetadataSidecar | None - parsed sidecar, if it exists
     """
+    backend = storage_backend or StorageBackendEnum(C.STORAGE_BACKEND)
+
+    if backend == StorageBackendEnum.AZURE_BLOB:
+        return await _scan_blob_storage(backend)
+
+    # Local storage scan
     managed_root = scan_path or os.path.join(C.DATA_FOLDER, "managed")
 
     if not os.path.isdir(managed_root):
         log.warning(f"Managed storage directory does not exist: {managed_root}")
         return {}
 
-    storage = LocalFileStorage(managed_root=managed_root)
+    storage = get_storage(backend, managed_root=managed_root)
     entries = os.listdir(managed_root)
 
     # Index sidecar files by doc_id
@@ -92,6 +99,46 @@ async def scan_managed_storage(
     return result
 
 
+async def _scan_blob_storage(backend: StorageBackendEnum) -> dict[str, dict]:
+    """Scan Azure Blob Storage container for files and sidecars."""
+    storage = get_storage(backend)
+    blobs = await storage.list_files()
+
+    # Index sidecars by doc_id
+    sidecar_map: dict[str, dict] = {}
+    for blob in blobs:
+        if blob["name"].endswith(".metadata.json"):
+            doc_id = blob["name"].removesuffix(".metadata.json")
+            sidecar_map[doc_id] = blob["path"]
+
+    # Index managed files by doc_id
+    result: dict[str, dict] = {}
+    for blob in blobs:
+        if blob["name"].endswith(".metadata.json"):
+            continue
+        doc_id = _doc_id_from_filename(blob["name"])
+        if not doc_id:
+            continue
+
+        sidecar_path = sidecar_map.get(doc_id)
+        sidecar = None
+        if sidecar_path:
+            try:
+                data = await storage.read_sidecar(sidecar_path)
+                sidecar = MetadataSidecar(**data)
+            except Exception as e:
+                log.warning(f"Failed to read blob sidecar {sidecar_path}: {e}")
+
+        result[doc_id] = {
+            "file_path": blob["path"],
+            "sidecar_path": sidecar_path,
+            "sidecar": sidecar,
+        }
+
+    log.info(f"Scanned {len(result)} blobs in Azure Blob Storage")
+    return result
+
+
 async def scan_db_documents() -> dict[str, Document]:
     """Query all documents from the database, indexed by ID."""
     docs = await Document.afind({})
@@ -103,22 +150,25 @@ async def scan_db_documents() -> dict[str, Document]:
 async def build_sync_plan(
     scan_path: str | None = None,
     verify_content: bool = False,
+    storage_backend: StorageBackendEnum | None = None,
 ) -> SyncPlan:
     """Compare managed storage with database and build a sync plan.
 
     Args:
-        scan_path: Override for managed storage path.
+        scan_path: Override for managed storage path (local backend only).
         verify_content: If True, verify file content via SHA256 comparison.
+        storage_backend: Storage backend to use. Defaults to config.
 
     Returns:
         SyncPlan with items and summary counts.
     """
+    backend = storage_backend or StorageBackendEnum(C.STORAGE_BACKEND)
     managed_root = scan_path or os.path.join(C.DATA_FOLDER, "managed")
-    disk_files = await scan_managed_storage(scan_path)
+    disk_files = await scan_managed_storage(scan_path, storage_backend=backend)
     db_docs = await scan_db_documents()
 
     items: list[SyncItem] = []
-    storage = LocalFileStorage(managed_root=managed_root)
+    storage = get_storage(backend, managed_root=managed_root) if backend == StorageBackendEnum.LOCAL else get_storage(backend)
 
     # Check each file on disk against DB
     for doc_id, disk_info in disk_files.items():

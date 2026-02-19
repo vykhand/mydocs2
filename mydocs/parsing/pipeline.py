@@ -18,7 +18,7 @@ from mydocs.models import (
     StorageBackendEnum,
     StorageModeEnum,
 )
-from mydocs.parsing.storage.local import LocalFileStorage
+from mydocs.parsing.storage import get_storage
 
 log = get_logger(__name__)
 
@@ -68,6 +68,7 @@ async def ingest_files(
     storage_mode: StorageModeEnum = StorageModeEnum.MANAGED,
     tags: list[str] | None = None,
     recursive: bool = True,
+    storage_backend: StorageBackendEnum | None = None,
 ) -> tuple[list[Document], list[dict]]:
     """
     Ingest files from a source path or list of paths.
@@ -89,7 +90,8 @@ async def ingest_files(
 
     log.info(f"Discovered {len(all_files)} files from {len(sources)} source(s)")
 
-    storage = LocalFileStorage()
+    backend = storage_backend or StorageBackendEnum(C.STORAGE_BACKEND)
+    storage = get_storage(backend)
 
     for file_path in all_files:
         file_type = detect_file_type(str(file_path))
@@ -106,7 +108,7 @@ async def ingest_files(
                 file_type=file_type,
                 original_path=str(file_path.resolve()),
                 storage_mode=storage_mode,
-                storage_backend=StorageBackendEnum.LOCAL,
+                storage_backend=backend,
                 status=DocumentStatusEnum.NOT_SUPPORTED,
                 tags=tags,
                 created_at=datetime.now(),
@@ -130,7 +132,7 @@ async def ingest_files(
             file_type=file_type,
             original_path=str(file_path.resolve()),
             storage_mode=storage_mode,
-            storage_backend=StorageBackendEnum.LOCAL,
+            storage_backend=backend,
             file_metadata=file_metadata,
             status=DocumentStatusEnum.NEW,
             tags=tags,
