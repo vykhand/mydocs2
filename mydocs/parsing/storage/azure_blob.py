@@ -44,8 +44,11 @@ class AzureBlobStorage(FileStorage):
             return BlobServiceClient.from_connection_string(C.AZURE_STORAGE_CONNECTION_STRING)
 
         if C.AZURE_STORAGE_ACCOUNT_NAME:
-            from azure.identity.aio import DefaultAzureCredential
             account_url = f"https://{C.AZURE_STORAGE_ACCOUNT_NAME}.blob.core.windows.net"
+            if C.AZURE_STORAGE_ACCOUNT_KEY:
+                return BlobServiceClient(account_url, credential=C.AZURE_STORAGE_ACCOUNT_KEY)
+            # No key — fall back to DefaultAzureCredential (managed identity, Azure CLI, etc.)
+            from azure.identity.aio import DefaultAzureCredential
             return BlobServiceClient(account_url, credential=DefaultAzureCredential())
 
         raise ValueError(
@@ -195,13 +198,17 @@ class AzureBlobStorage(FileStorage):
         # Get account details for SAS generation
         account_name = self._client.account_name
 
-        if C.AZURE_STORAGE_CONNECTION_STRING:
-            # Extract account key from connection string
+        # Determine account key for SAS generation
+        account_key = None
+        if C.AZURE_STORAGE_ACCOUNT_KEY:
+            account_key = C.AZURE_STORAGE_ACCOUNT_KEY
+        elif C.AZURE_STORAGE_CONNECTION_STRING:
             from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
             sync_client = SyncBlobServiceClient.from_connection_string(C.AZURE_STORAGE_CONNECTION_STRING)
             account_key = sync_client.credential.account_key
             sync_client.close()
 
+        if account_key:
             sas_token = generate_blob_sas(
                 account_name=account_name,
                 container_name=container,
@@ -212,7 +219,6 @@ class AzureBlobStorage(FileStorage):
             )
         else:
             # Use user delegation key with DefaultAzureCredential
-            from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
             delegation_start = datetime.now(timezone.utc)
             delegation_expiry = delegation_start + timedelta(hours=expiry_hours)
             user_delegation_key = await self._client.get_user_delegation_key(
