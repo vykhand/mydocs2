@@ -192,7 +192,7 @@ class BaseExtractor:
                 extraction_mode=self.request.extraction_mode,
                 content_mode=self.request.content_mode,
                 reference_granularity=self.request.reference_granularity,
-                output_schema_name=self.request.output_schema or "default",
+                output_schema_name=self.request.output_schema or prompt_config.output_schema,
             )
 
             group_result = await self._run_group(group_state)
