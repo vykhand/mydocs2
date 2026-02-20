@@ -266,9 +266,36 @@ docker compose down
 
 ## 5. Kubernetes Deployment
 
-### 5.1 Namespace
+Kubernetes manifests use a **Kustomize base + overlays** pattern. The base contains cloud-agnostic manifests with generic image references. Each deployment target adds an overlay that customizes images, ingress, TLS, and secrets for its environment.
 
-All resources live in a dedicated namespace:
+```
+deploy/k8s/
+  base/                         # Cloud-agnostic manifests
+    kustomization.yaml
+    namespace.yml, configmap.yml, pvc.yml, ...
+    secret.yml.example          # Template (not applied by Kustomize)
+  overlays/
+    self-hosted/                # Manual deploy to any K8s cluster
+      kustomization.yaml
+      secret.yml                # User-created (gitignored)
+    azure/                      # CI/CD deploy to Azure AKS
+      kustomization.yaml
+      ingress-patch.yml         # TLS + cert-manager
+```
+
+### 5.1 Deployment Targets
+
+| Target | How to deploy | Images from |
+|--------|--------------|-------------|
+| **Self-hosted** | `kubectl apply -k deploy/k8s/overlays/self-hosted/` | Any registry |
+| **Azure AKS** | Push to `azure-deployment` branch (CI/CD) | Azure Container Registry |
+| **Future targets** | Add new overlay + workflow | Target-specific registry |
+
+### 5.2 Base Manifests
+
+The base contains all resources common across deployment targets. Images use generic names (`mydocs-backend:latest`, `mydocs-ui:latest`) that Kustomize overlays or `kustomize edit set image` can transform.
+
+#### Namespace
 
 ```yaml
 apiVersion: v1
@@ -277,9 +304,9 @@ metadata:
   name: mydocs
 ```
 
-### 5.2 Secret
+#### Secret (template only)
 
-Sensitive configuration stored in a Kubernetes Secret:
+A `secret.yml.example` file documents the required keys. It is **not** listed in `kustomization.yaml` — each overlay manages secrets independently (self-hosted: user-created file; CI/CD: created from GitHub Secrets).
 
 ```yaml
 apiVersion: v1
@@ -289,22 +316,19 @@ metadata:
   namespace: mydocs
 type: Opaque
 stringData:
-  MONGO_URL: "mongodb+srv://cluster.mongodb.net"
-  MONGO_USER: "mydocs_user"
-  MONGO_PASSWORD: "***"
-  MONGO_DB_NAME: "mydocs"
-  AZURE_DI_ENDPOINT: "https://mydi.cognitiveservices.azure.com"
-  AZURE_DI_API_KEY: "***"
-  AZURE_OPENAI_API_KEY: "***"
-  AZURE_OPENAI_API_BASE: "https://myoai.openai.azure.com"
-  # Entra ID (Azure AD) — set these to enable backend JWT validation
+  MONGO_URL: ""
+  MONGO_USER: ""
+  MONGO_PASSWORD: ""
+  MONGO_DB_NAME: ""
+  AZURE_DI_ENDPOINT: ""
+  AZURE_DI_API_KEY: ""
+  AZURE_OPENAI_API_KEY: ""
+  AZURE_OPENAI_API_BASE: ""
   ENTRA_TENANT_ID: ""
   ENTRA_CLIENT_ID: ""
 ```
 
-### 5.3 Backend Deployment
-
-The image tag is a placeholder; CI/CD overwrites it via `kubectl set image` on each deploy.
+#### Backend Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -324,8 +348,7 @@ spec:
     spec:
       containers:
         - name: backend
-          # Image tag is overwritten by CI/CD via `kubectl set image`
-          image: YOUR_ACR.azurecr.io/mydocs-backend:latest
+          image: mydocs-backend:latest
           ports:
             - containerPort: 8000
           envFrom:
@@ -369,7 +392,7 @@ spec:
             name: mydocs-config
 ```
 
-### 5.4 UI Deployment
+#### UI Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -389,8 +412,7 @@ spec:
     spec:
       containers:
         - name: ui
-          # Image tag is overwritten by CI/CD via `kubectl set image`
-          image: YOUR_ACR.azurecr.io/mydocs-ui:latest
+          image: mydocs-ui:latest
           ports:
             - containerPort: 80
           livenessProbe:
@@ -407,7 +429,7 @@ spec:
               memory: 128Mi
 ```
 
-### 5.5 Services
+#### Services
 
 ```yaml
 apiVersion: v1
@@ -437,9 +459,9 @@ spec:
 
 The backend service name `backend` matches the Nginx upstream in the UI container, so `/api/` requests are proxied correctly via Kubernetes DNS (`backend.mydocs.svc.cluster.local`).
 
-### 5.6 Ingress
+#### Ingress (base)
 
-TLS is configured with a Kubernetes Secret (`mydocs-tls`). When cert-manager is installed in the cluster, uncomment the `cert-manager.io/cluster-issuer` annotation to enable automatic certificate provisioning.
+The base ingress is minimal — no TLS. Cloud-specific overlays patch in TLS and annotations.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -449,14 +471,8 @@ metadata:
   namespace: mydocs
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    # Uncomment the line below if you use cert-manager for automatic TLS
-    # cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
-  tls:
-    - hosts:
-        - mydocs.example.com
-      secretName: mydocs-tls
   rules:
     - host: mydocs.example.com
       http:
@@ -470,7 +486,78 @@ spec:
                   number: 80
 ```
 
-All traffic enters through the UI Nginx, which handles SPA routing and reverse-proxies `/api/` to the backend service. TLS termination happens at the Ingress controller.
+### 5.3 Self-Hosted Overlay
+
+For deploying to any Kubernetes cluster (on-prem, Minikube, k3s, etc.) without CI/CD.
+
+```yaml
+# deploy/k8s/overlays/self-hosted/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - secret.yml    # Create from ../../base/secret.yml.example
+```
+
+Deploy:
+
+```bash
+# 1. Create secret from template
+cp deploy/k8s/base/secret.yml.example deploy/k8s/overlays/self-hosted/secret.yml
+# Edit secret.yml with your values
+
+# 2. (Optional) Set custom image registry
+cd deploy/k8s/overlays/self-hosted
+kustomize edit set image \
+  mydocs-backend=your-registry/mydocs-backend:TAG \
+  mydocs-ui=your-registry/mydocs-ui:TAG
+
+# 3. Apply
+kubectl apply -k deploy/k8s/overlays/self-hosted/
+```
+
+### 5.4 Azure AKS Overlay
+
+Used by the CI/CD pipeline. Patches the base ingress with TLS and cert-manager.
+
+```yaml
+# deploy/k8s/overlays/azure/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - path: ingress-patch.yml
+```
+
+```yaml
+# deploy/k8s/overlays/azure/ingress-patch.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mydocs-ingress
+  namespace: mydocs
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - mydocs.example.com
+      secretName: mydocs-tls
+```
+
+Images and secrets are set dynamically by CI/CD (see Section 8).
+
+### 5.5 Adding a New Cloud Target
+
+To add support for a new cloud (e.g., AWS EKS):
+
+1. Create `deploy/k8s/overlays/aws/kustomization.yaml` referencing `../../base`.
+2. Add any cloud-specific patches (e.g., ALB ingress annotations instead of nginx).
+3. Create `.github/workflows/deploy-eks.yml` following the Azure workflow as a template — swap `az` commands for `aws` commands, ACR for ECR, etc.
+4. Add a trigger branch (`aws-deployment`).
+
+All traffic enters through the UI Nginx, which handles SPA routing and reverse-proxies `/api/` to the backend service. TLS termination happens at the Ingress controller (configured per-overlay).
 
 ---
 
@@ -519,38 +606,59 @@ Files introduced by this spec:
 ```
 ├── .github/
 │   └── workflows/
-│       └── deploy-aks.yml      # CI/CD: build → ACR → AKS
-├── Dockerfile.backend          # Backend image build
-├── Dockerfile.ui               # UI image build (multi-stage with Nginx)
-├── docker-compose.yml          # Local / single-server deployment
+│       └── deploy-aks.yml              # CI/CD: build → ACR → AKS
+├── Dockerfile.backend                  # Backend image build
+├── Dockerfile.ui                       # UI image build (multi-stage with Nginx)
+├── docker-compose.yml                  # Local / single-server deployment
 ├── deploy/
-│   ├── nginx.conf              # Nginx config for UI container
+│   ├── nginx.conf                      # Nginx config for UI container
 │   └── k8s/
-│       ├── namespace.yml
-│       ├── secret.yml
-│       ├── configmap.yml
-│       ├── pvc.yml
-│       ├── backend-deployment.yml
-│       ├── backend-service.yml
-│       ├── ui-deployment.yml
-│       ├── ui-service.yml
-│       └── ingress.yml
+│       ├── base/                       # Cloud-agnostic K8s manifests
+│       │   ├── kustomization.yaml
+│       │   ├── namespace.yml
+│       │   ├── configmap.yml
+│       │   ├── pvc.yml
+│       │   ├── backend-deployment.yml
+│       │   ├── backend-service.yml
+│       │   ├── ui-deployment.yml
+│       │   ├── ui-service.yml
+│       │   ├── ingress.yml
+│       │   └── secret.yml.example      # Template (not applied)
+│       └── overlays/
+│           ├── self-hosted/
+│           │   ├── kustomization.yaml
+│           │   ├── README.md
+│           │   └── secret.yml          # User-created (gitignored)
+│           └── azure/
+│               ├── kustomization.yaml
+│               └── ingress-patch.yml   # TLS + cert-manager
 ```
 
 ---
 
 ## 8. CI/CD Pipeline
 
-Automated build and deployment is handled by a GitHub Actions workflow (`.github/workflows/deploy-aks.yml`). The pipeline targets **Azure Kubernetes Service (AKS)** with images stored in **Azure Container Registry (ACR)**.
+Each cloud target gets its own GitHub Actions workflow and trigger branch. Workflows follow a common pattern: build images → push to registry → deploy via Kustomize overlay.
 
-### 8.1 Trigger
+### 8.1 Multi-Target Strategy
 
-The workflow runs on:
+| Target | Trigger Branch | Workflow | Overlay |
+|--------|---------------|----------|---------|
+| **Azure AKS** | `azure-deployment` | `deploy-aks.yml` | `deploy/k8s/overlays/azure/` |
+| **AWS EKS** (future) | `aws-deployment` | `deploy-eks.yml` | `deploy/k8s/overlays/aws/` |
+| **Self-hosted** | n/a (manual) | n/a | `deploy/k8s/overlays/self-hosted/` |
+
+All workflows also support `workflow_dispatch` for manual one-off deploys with an optional image tag override.
+
+### 8.2 Azure AKS Pipeline (`deploy-aks.yml`)
+
+#### Trigger
 
 - **Push** to the `azure-deployment` branch (builds **and** deploys).
 - **Pull request** targeting the `azure-deployment` branch (builds only, no deploy).
+- **Manual dispatch** with optional image tag.
 
-### 8.2 Required Configuration
+#### Required Configuration
 
 **GitHub Secrets** (set in repository Settings → Secrets and variables → Actions):
 
@@ -561,6 +669,9 @@ The workflow runs on:
 | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
 | `ENTRA_CLIENT_ID` | Entra ID app registration client ID (baked into UI at build time) |
 | `ENTRA_AUTHORITY` | Entra ID authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>` |
+| `MONGO_URL`, `MONGO_USER`, `MONGO_PASSWORD`, `MONGO_DB_NAME` | MongoDB connection details |
+| `AZURE_DI_ENDPOINT`, `AZURE_DI_API_KEY` | Azure Document Intelligence |
+| `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_BASE` | Azure OpenAI |
 
 **GitHub Variables** (set in repository Settings → Secrets and variables → Actions → Variables):
 
@@ -570,35 +681,39 @@ The workflow runs on:
 | `AKS_CLUSTER_NAME` | `mydocs-aks` | AKS cluster name |
 | `AKS_RESOURCE_GROUP` | `mydocs-rg` | Resource group containing the AKS cluster |
 
-### 8.3 Pipeline Stages
+#### Pipeline Stages
 
 ```
 push to azure-deployment
         │
         ▼
-┌───────────────────────────┐
-│  Build Job                │
-│  1. Checkout              │
-│  2. Azure Login (OIDC)    │
-│  3. ACR Login             │
-│  4. Build & push backend  │
-│     image (SHA + latest)  │
-│  5. Build & push UI image │
-│     (SHA + latest, with   │
-│      VITE_ENTRA_* args)   │
-└───────────┬───────────────┘
+┌───────────────────────────────┐
+│  Build Job                    │
+│  1. Checkout                  │
+│  2. Azure Login (OIDC)        │
+│  3. ACR Login                 │
+│  4. Build & push backend      │
+│     image (SHA + latest)      │
+│  5. Build & push UI image     │
+│     (SHA + latest, with       │
+│      VITE_ENTRA_* args)       │
+└───────────┬───────────────────┘
             │ (push only, not on PR)
             ▼
-┌───────────────────────────┐
-│  Deploy Job               │
-│  1. Azure Login (OIDC)    │
-│  2. Get AKS credentials   │
-│  3. kubectl apply manifests│
-│  4. kubectl set image     │
-│     (backend + UI → SHA)  │
-│  5. Wait for rollout      │
-└───────────────────────────┘
+┌───────────────────────────────┐
+│  Deploy Job                   │
+│  1. Azure Login (OIDC)        │
+│  2. Get AKS credentials       │
+│  3. Create K8s secret from    │
+│     GitHub Secrets             │
+│  4. kustomize edit set image  │
+│     (stamp ACR + SHA tag)     │
+│  5. kubectl apply -k overlay  │
+│  6. Wait for rollout          │
+└───────────────────────────────┘
 ```
+
+The deploy job uses `kustomize edit set image` to stamp the correct ACR registry and commit SHA into the overlay, then applies with `kubectl apply -k`. Secrets are created idempotently from GitHub Secrets via `kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`.
 
 ### 8.4 Manual / Local Builds
 
