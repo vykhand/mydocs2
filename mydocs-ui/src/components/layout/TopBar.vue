@@ -4,9 +4,11 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useResponsive } from '@/composables/useResponsive'
 import ModeToggle from '@/components/common/ModeToggle.vue'
-import { Sun, Moon, Monitor, PanelLeftClose, PanelLeft, Search, Upload, Settings } from 'lucide-vue-next'
+import { useAuth } from '@/auth/useAuth'
+import { Sun, Moon, Monitor, PanelLeftClose, PanelLeft, Search, Upload, Settings, LogOut } from 'lucide-vue-next'
 
 const appStore = useAppStore()
+const { userName, logout } = useAuth()
 const router = useRouter()
 const route = useRoute()
 const { isMobile } = useResponsive()
@@ -131,6 +133,22 @@ function cycleTheme() {
         <Sun v-if="appStore.theme === 'light'" :size="18" />
         <Moon v-else-if="appStore.theme === 'dark'" :size="18" />
         <Monitor v-else :size="18" />
+      </button>
+      <!-- User info & logout -->
+      <span
+        v-if="userName"
+        class="hidden md:inline text-xs truncate max-w-[120px]"
+        style="color: var(--color-text-secondary);"
+        :title="userName"
+      >{{ userName }}</span>
+      <button
+        @click="logout"
+        class="p-2 rounded-md hover:opacity-80 transition-opacity"
+        style="color: var(--color-text-secondary);"
+        aria-label="Sign out"
+        title="Sign out"
+      >
+        <LogOut :size="18" />
       </button>
     </div>
   </header>

@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: ui
-          image: mydocs-ui:latest
+          # Image tag is overwritten by CI/CD via `kubectl set image`
+          image: YOUR_ACR.azurecr.io/mydocs-ui:latest
           ports:
             - containerPort: 80
           livenessProbe:
