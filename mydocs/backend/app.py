@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +14,7 @@ from mydocs.backend.routes.documents import router as documents_router
 from mydocs.backend.routes.extract import router as extract_router
 from mydocs.backend.routes.search import router as search_router
 from mydocs.backend.routes.sync import router as sync_router
+from mydocs.backend.auth import get_current_user
 
 
 @asynccontextmanager
@@ -42,11 +43,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    application.include_router(cases_router)
-    application.include_router(documents_router)
-    application.include_router(extract_router)
-    application.include_router(search_router)
-    application.include_router(sync_router)
+    # All API routes require a valid Entra ID token (skipped when
+    # ENTRA_TENANT_ID is unset, e.g. local development).
+    auth_dep = [Depends(get_current_user)]
+    application.include_router(cases_router, dependencies=auth_dep)
+    application.include_router(documents_router, dependencies=auth_dep)
+    application.include_router(extract_router, dependencies=auth_dep)
+    application.include_router(search_router, dependencies=auth_dep)
+    application.include_router(sync_router, dependencies=auth_dep)
 
     @application.get("/health")
     async def health():

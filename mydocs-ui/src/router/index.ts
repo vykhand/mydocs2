@@ -1,9 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useAuth } from '@/auth/useAuth'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { public: true },
+    },
     {
       path: '/',
       name: 'gallery',
@@ -50,6 +57,15 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from) => {
+  // Auth guard: redirect unauthenticated users to /login
+  const { isAuthenticated } = useAuth()
+  if (!to.meta.public && !isAuthenticated.value) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.name === 'login' && isAuthenticated.value) {
+    return { path: '/' }
+  }
+
   // Sync activeTab from route meta
   const appStore = useAppStore()
   const tab = to.meta.tab as 'documents' | 'cases' | undefined

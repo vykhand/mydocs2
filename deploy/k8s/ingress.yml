@@ -5,7 +5,14 @@ metadata:
   namespace: mydocs
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    # Uncomment the line below if you use cert-manager for automatic TLS
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - mydocs.example.com
+      secretName: mydocs-tls
   rules:
     - host: mydocs.example.com
       http:
