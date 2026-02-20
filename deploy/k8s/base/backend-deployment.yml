@@ -15,8 +15,7 @@ spec:
     spec:
       containers:
         - name: backend
-          # Image tag is overwritten by CI/CD via `kubectl set image`
-          image: YOUR_ACR.azurecr.io/mydocs-backend:latest
+          image: mydocs-backend:latest
           ports:
             - containerPort: 8000
           envFrom:
