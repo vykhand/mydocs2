@@ -77,7 +77,11 @@ COPY mydocs-ui/package.json mydocs-ui/package-lock.json ./
 RUN npm ci
 COPY mydocs-ui/ .
 ARG VITE_API_BASE_URL=/api/v1
+ARG VITE_ENTRA_CLIENT_ID=""
+ARG VITE_ENTRA_AUTHORITY=""
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_ENTRA_CLIENT_ID=${VITE_ENTRA_CLIENT_ID}
+ENV VITE_ENTRA_AUTHORITY=${VITE_ENTRA_AUTHORITY}
 RUN npm run build
 
 # Stage 2 -- serve
@@ -94,6 +98,8 @@ EXPOSE 80
 | Static files | `/usr/share/nginx/html` |
 | Health check | `GET /` returns `200` |
 | Build arg | `VITE_API_BASE_URL` (default `/api/v1`) |
+| Build arg | `VITE_ENTRA_CLIENT_ID` -- Entra ID app registration client ID (baked into SPA at build time) |
+| Build arg | `VITE_ENTRA_AUTHORITY` -- Entra ID authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>` |
 
 ### 2.3 Nginx Configuration (`deploy/nginx.conf`)
 
@@ -237,6 +243,8 @@ All secrets and configuration are supplied via `.env` file (not committed to git
 | `AZURE_DI_API_KEY` | `***` |
 | `AZURE_OPENAI_API_KEY` | `***` |
 | `AZURE_OPENAI_API_BASE` | `https://myoai.openai.azure.com` |
+| `ENTRA_TENANT_ID` | (empty to disable auth in local dev) |
+| `ENTRA_CLIENT_ID` | Entra ID app registration client ID |
 
 ### 4.3 Usage
 
@@ -289,9 +297,14 @@ stringData:
   AZURE_DI_API_KEY: "***"
   AZURE_OPENAI_API_KEY: "***"
   AZURE_OPENAI_API_BASE: "https://myoai.openai.azure.com"
+  # Entra ID (Azure AD) — set these to enable backend JWT validation
+  ENTRA_TENANT_ID: ""
+  ENTRA_CLIENT_ID: ""
 ```
 
 ### 5.3 Backend Deployment
+
+The image tag is a placeholder; CI/CD overwrites it via `kubectl set image` on each deploy.
 
 ```yaml
 apiVersion: apps/v1
@@ -311,7 +324,8 @@ spec:
     spec:
       containers:
         - name: backend
-          image: mydocs-backend:latest
+          # Image tag is overwritten by CI/CD via `kubectl set image`
+          image: YOUR_ACR.azurecr.io/mydocs-backend:latest
           ports:
             - containerPort: 8000
           envFrom:
@@ -375,7 +389,8 @@ spec:
     spec:
       containers:
         - name: ui
-          image: mydocs-ui:latest
+          # Image tag is overwritten by CI/CD via `kubectl set image`
+          image: YOUR_ACR.azurecr.io/mydocs-ui:latest
           ports:
             - containerPort: 80
           livenessProbe:
@@ -424,6 +439,8 @@ The backend service name `backend` matches the Nginx upstream in the UI containe
 
 ### 5.6 Ingress
 
+TLS is configured with a Kubernetes Secret (`mydocs-tls`). When cert-manager is installed in the cluster, uncomment the `cert-manager.io/cluster-issuer` annotation to enable automatic certificate provisioning.
+
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -432,7 +449,14 @@ metadata:
   namespace: mydocs
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    # Uncomment the line below if you use cert-manager for automatic TLS
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - mydocs.example.com
+      secretName: mydocs-tls
   rules:
     - host: mydocs.example.com
       http:
@@ -446,7 +470,7 @@ spec:
                   number: 80
 ```
 
-All traffic enters through the UI Nginx, which handles SPA routing and reverse-proxies `/api/` to the backend service.
+All traffic enters through the UI Nginx, which handles SPA routing and reverse-proxies `/api/` to the backend service. TLS termination happens at the Ingress controller.
 
 ---
 
@@ -490,9 +514,12 @@ All traffic enters through the UI Nginx, which handles SPA routing and reverse-p
 
 ## 7. File Layout
 
-New files introduced by this spec:
+Files introduced by this spec:
 
 ```
+├── .github/
+│   └── workflows/
+│       └── deploy-aks.yml      # CI/CD: build → ACR → AKS
 ├── Dockerfile.backend          # Backend image build
 ├── Dockerfile.ui               # UI image build (multi-stage with Nginx)
 ├── docker-compose.yml          # Local / single-server deployment
@@ -512,25 +539,125 @@ New files introduced by this spec:
 
 ---
 
-## 8. Build and Publish
+## 8. CI/CD Pipeline
 
-Images are built and tagged with the git short SHA and `latest`:
+Automated build and deployment is handled by a GitHub Actions workflow (`.github/workflows/deploy-aks.yml`). The pipeline targets **Azure Kubernetes Service (AKS)** with images stored in **Azure Container Registry (ACR)**.
+
+### 8.1 Trigger
+
+The workflow runs on:
+
+- **Push** to the `azure-deployment` branch (builds **and** deploys).
+- **Pull request** targeting the `azure-deployment` branch (builds only, no deploy).
+
+### 8.2 Required Configuration
+
+**GitHub Secrets** (set in repository Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID` | Service principal or managed-identity client ID for Azure OIDC login |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `ENTRA_CLIENT_ID` | Entra ID app registration client ID (baked into UI at build time) |
+| `ENTRA_AUTHORITY` | Entra ID authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>` |
+
+**GitHub Variables** (set in repository Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `ACR_NAME` | `mydocsacr` | Azure Container Registry name (without `.azurecr.io`) |
+| `AKS_CLUSTER_NAME` | `mydocs-aks` | AKS cluster name |
+| `AKS_RESOURCE_GROUP` | `mydocs-rg` | Resource group containing the AKS cluster |
+
+### 8.3 Pipeline Stages
+
+```
+push to azure-deployment
+        │
+        ▼
+┌───────────────────────────┐
+│  Build Job                │
+│  1. Checkout              │
+│  2. Azure Login (OIDC)    │
+│  3. ACR Login             │
+│  4. Build & push backend  │
+│     image (SHA + latest)  │
+│  5. Build & push UI image │
+│     (SHA + latest, with   │
+│      VITE_ENTRA_* args)   │
+└───────────┬───────────────┘
+            │ (push only, not on PR)
+            ▼
+┌───────────────────────────┐
+│  Deploy Job               │
+│  1. Azure Login (OIDC)    │
+│  2. Get AKS credentials   │
+│  3. kubectl apply manifests│
+│  4. kubectl set image     │
+│     (backend + UI → SHA)  │
+│  5. Wait for rollout      │
+└───────────────────────────┘
+```
+
+### 8.4 Manual / Local Builds
+
+Images can also be built and tagged locally:
 
 ```bash
 # Backend
 docker build -f Dockerfile.backend -t mydocs-backend:$(git rev-parse --short HEAD) .
-docker tag mydocs-backend:$(git rev-parse --short HEAD) mydocs-backend:latest
 
-# UI
-docker build -f Dockerfile.ui -t mydocs-ui:$(git rev-parse --short HEAD) .
-docker tag mydocs-ui:$(git rev-parse --short HEAD) mydocs-ui:latest
+# UI (with OAuth build args)
+docker build -f Dockerfile.ui \
+  --build-arg VITE_ENTRA_CLIENT_ID=<client-id> \
+  --build-arg VITE_ENTRA_AUTHORITY=https://login.microsoftonline.com/<tenant-id> \
+  -t mydocs-ui:$(git rev-parse --short HEAD) .
 ```
-
-CI/CD pipeline (GitHub Actions, out of scope for this spec) would push images to a container registry and update the K8s manifests with the new tag.
 
 ---
 
-## 9. Scaling Considerations
+## 9. Authentication
+
+Authentication is implemented using **Microsoft Entra ID** (Azure AD) with an OAuth 2.0 / OpenID Connect flow.
+
+### 9.1 Architecture
+
+```
+┌──────────┐     MSAL redirect     ┌─────────────────┐
+│  Browser  │ ◄──────────────────► │  Entra ID       │
+│  (Vue SPA)│    access_token       │  (login.ms.com) │
+└─────┬─────┘                       └─────────────────┘
+      │ Authorization: Bearer <token>
+      ▼
+┌─────────────┐
+│  Backend    │ ── validates JWT signature via Entra JWKS
+│  (FastAPI)  │
+└─────────────┘
+```
+
+1. The **Vue UI** uses `@azure/msal-browser` to perform a redirect-based login against Entra ID and obtain an access token.
+2. Every API request includes the token in the `Authorization: Bearer <token>` header.
+3. The **FastAPI backend** validates the JWT signature, audience, issuer, and expiry using Entra's public JWKS keys.
+4. The `/health` endpoint remains **unauthenticated** so Kubernetes probes work without tokens.
+
+### 9.2 Local Development
+
+When `ENTRA_TENANT_ID` is **unset or empty**, the backend skips token validation entirely and returns a stub user (`local-dev`). The UI will also skip the login redirect when `VITE_ENTRA_CLIENT_ID` is empty. This allows the application to run without any Entra ID configuration during local development.
+
+### 9.3 Configuration
+
+| Layer | Variable | Description |
+|-------|----------|-------------|
+| Backend (env) | `ENTRA_TENANT_ID` | Azure AD tenant ID. Empty = auth disabled. |
+| Backend (env) | `ENTRA_CLIENT_ID` | App registration client ID (audience for token validation). |
+| Backend (env) | `ENTRA_ISSUER` | (Optional) Token issuer URL. Defaults to `https://login.microsoftonline.com/{tenant_id}/v2.0`. |
+| UI (build arg) | `VITE_ENTRA_CLIENT_ID` | Same client ID, baked into the SPA at build time. |
+| UI (build arg) | `VITE_ENTRA_AUTHORITY` | Authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>`. |
+
+---
+
+## 10. Scaling Considerations
 
 | Component | Scalability Notes |
 |-----------|-------------------|

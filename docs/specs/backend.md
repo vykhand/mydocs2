@@ -33,8 +33,12 @@ Environment-variable-based configuration for infrastructure settings:
 | `CONFIG_ROOT` | No | Root config folder (default: `./config`) |
 | `SERVICE_NAME` | No | Service identifier (default: `mydocs`) |
 | `LOG_LEVEL` | No | Logging level (default: `INFO`, used by tinystructlog) |
+| `ENTRA_TENANT_ID` | No | Azure AD tenant ID. When empty, authentication is disabled (local dev mode). |
+| `ENTRA_CLIENT_ID` | No** | Entra ID app registration client ID. Required when `ENTRA_TENANT_ID` is set. |
+| `ENTRA_ISSUER` | No | Token issuer URL (default: `https://login.microsoftonline.com/{ENTRA_TENANT_ID}/v2.0`). |
 
 *Required when Azure DI parser is used.
+**Required when `ENTRA_TENANT_ID` is set.
 
 ---
 
@@ -46,6 +50,10 @@ Environment-variable-based configuration for infrastructure settings:
 GET /health
 Response: { "status": "ok" }
 ```
+
+The health endpoint is **unauthenticated** -- it is excluded from the global auth dependency so Kubernetes liveness/readiness probes work without tokens.
+
+All other `/api/v1/*` endpoints require a valid Bearer token when authentication is enabled (see Section 8).
 
 ### 3.1 Ingest Files
 ```
@@ -541,6 +549,7 @@ All API errors return a consistent JSON format:
 
 | HTTP Status | Error Code | Description |
 |-------------|------------|-------------|
+| 401 | `UNAUTHORIZED` | Missing, expired, or invalid Bearer token (see Section 8) |
 | 400 | `INVALID_REQUEST` | Malformed request body or parameters |
 | 404 | `DOCUMENT_NOT_FOUND` | Document ID does not exist |
 | 409 | `DOCUMENT_LOCKED` | Document is currently being parsed |
@@ -556,6 +565,7 @@ mydocs/
   backend/
     __init__.py
     app.py                      # FastAPI application factory
+    auth.py                     # Entra ID JWT validation (get_current_user dependency)
     routes/
       __init__.py
       documents.py              # Ingest, parse, get, tags endpoints
@@ -577,3 +587,43 @@ mydocs/
 | `python-dotenv` | Environment variable loading |
 | `lightodm` | MongoDB ODM (transitive) |
 | `pydantic` | Request/response models (transitive via FastAPI) |
+| `PyJWT[crypto]` | JWT decoding and RS256 signature validation (Entra ID auth) |
+| `httpx` | Async HTTP client for fetching Entra ID JWKS keys |
+
+---
+
+## 8. Authentication & Authorization
+
+### 8.1 Overview
+
+API authentication uses **Microsoft Entra ID** (Azure AD) JWT bearer tokens. The implementation lives in `mydocs/backend/auth.py` and is wired into the application as a **global dependency** on all API routers via `Depends(get_current_user)`.
+
+The `/health` endpoint is explicitly excluded from authentication so Kubernetes liveness and readiness probes work without tokens.
+
+### 8.2 Token Validation Flow
+
+1. Extract the `Authorization: Bearer <token>` header via FastAPI's `HTTPBearer` security scheme.
+2. Decode the JWT header (unverified) to obtain the `kid` (key ID).
+3. Fetch the signing keys from Microsoft's JWKS endpoint (`https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys`). Keys are cached in-memory; the cache is busted and retried once if the `kid` is not found (to handle key rotation).
+4. Verify the JWT signature (RS256), audience (`ENTRA_CLIENT_ID`), issuer (`ENTRA_ISSUER`), and expiry.
+5. Return the decoded claims as a `dict` to downstream route handlers.
+
+### 8.3 Local Development Mode
+
+When `ENTRA_TENANT_ID` is **unset or empty**, the `get_current_user` dependency skips all validation and returns a stub user:
+
+```python
+{"sub": "local-dev", "name": "Local Developer"}
+```
+
+This allows the entire application to run without any Entra ID configuration during local development.
+
+### 8.4 Error Responses
+
+| Condition | HTTP Status | Detail |
+|-----------|-------------|--------|
+| Missing `Authorization` header | 401 | `Missing authorization header` |
+| Malformed token | 401 | `Invalid token header` |
+| Signing key not found | 401 | `Unable to find signing key` |
+| Expired token | 401 | `Token has expired` |
+| Invalid signature/audience/issuer | 401 | `Token validation failed: <reason>` |
