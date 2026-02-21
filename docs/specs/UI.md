@@ -35,6 +35,7 @@ The UI follows a **unified gallery architecture**: a single `GalleryView` serves
 | PDF Viewer     | PDF.js (`pdfjs-dist`)| Renders PDF pages on canvas, supports text layer and highlight annotations |
 | Date Picker    | `@vuepic/vue-datepicker` | Rich date-range selection component  |
 | Notifications  | Vue Toastification   | Toast messages for user feedback        |
+| Auth           | `@azure/msal-browser` | Microsoft Entra ID OAuth redirect flow  |
 
 ## 2. Layout & Navigation
 
@@ -374,10 +375,13 @@ mydocs-ui/
   tsconfig.json
   package.json
   src/
-    main.ts                          # App bootstrap
+    main.ts                          # App bootstrap (initializes MSAL before mount)
     App.vue                          # Root component, registers keyboard shortcuts
+    auth/
+      msalConfig.ts                  # MSAL configuration (reads VITE_ENTRA_* env vars)
+      useAuth.ts                     # Auth composable: login, logout, getAccessToken
     router/
-      index.ts                       # Route definitions with meta-driven modals
+      index.ts                       # Route definitions with meta-driven modals + auth guard
     stores/
       app.ts                         # Global state (mode, theme, sidebar, viewer, activeTab, galleryViewMode)
       documents.ts                   # Document list state, filters, pagination
@@ -393,6 +397,7 @@ mydocs-ui/
       extract.ts                     # Extraction API calls
       health.ts                      # Health check with latency measurement
     views/
+      LoginView.vue                  # Sign-in page (Microsoft Entra ID redirect)
       GalleryView.vue                # Primary view: document gallery + search results
       CasesGalleryView.vue           # Cases card grid with create dialog
       CaseDetailView.vue             # Single case detail with document list
@@ -544,7 +549,10 @@ Uses `matchMedia` listeners for efficient breakpoint tracking.
 
 ```typescript
 const routes = [
-  // Primary routes
+  // Public routes
+  { path: '/login',     name: 'login',       component: LoginView,          meta: { public: true } },
+
+  // Authenticated routes
   { path: '/',          name: 'gallery',     component: GalleryView,        meta: { tab: 'documents' } },
   { path: '/doc/:id',   name: 'doc-viewer',  component: GalleryView,        meta: { tab: 'documents' } },
   { path: '/cases',     name: 'cases',       component: CasesGalleryView,   meta: { tab: 'cases' } },
@@ -563,6 +571,7 @@ const routes = [
 All routes are lazy-loaded for optimal bundle splitting.
 
 **Route guard behavior:**
+- **Auth guard**: If the route does not have `meta.public: true` and the user is not authenticated, redirect to `/login` with a `?redirect=` query param. If the user is authenticated and visits `/login`, redirect to `/`.
 - `beforeEach` syncs `activeTab` from `route.meta.tab`.
 - For `/doc/:id` routes, the guard calls `appStore.openViewer(id, page)` to open the right panel.
 - Navigating away from `/doc/` routes closes the viewer.
@@ -577,15 +586,32 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// Attach Bearer token to every request
+api.interceptors.request.use(async (config) => {
+  const { getAccessToken, isAuthenticated } = useAuth()
+  if (isAuthenticated.value) {
+    const token = await getAccessToken()
+    if (token) config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 api.interceptors.response.use(
   response => response,
   error => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid — redirect to login
+      useAuth().logout()
+      return Promise.reject(error)
+    }
     const detail = error.response?.data?.detail || 'An unexpected error occurred'
     toast.error(detail)
     return Promise.reject(error)
   }
 )
 ```
+
+The request interceptor acquires a fresh token silently via MSAL on each request. If the cached token is expired and a silent refresh fails, MSAL triggers an interactive redirect to Entra ID automatically.
 
 Additional API module:
 
@@ -666,7 +692,56 @@ export async function checkHealth(): Promise<{ status: string; latencyMs: number
 - **Bundle size** -- PDF.js worker loaded as a separate chunk; Tailwind purges unused styles in production.
 - **URL-driven state** -- filters and search queries are synced to URL params, avoiding unnecessary store hydration on navigation.
 
-## 11. Future Considerations
+## 11. Authentication
+
+### 11.1 Overview
+
+The UI uses **Microsoft Entra ID** (Azure AD) for authentication via the `@azure/msal-browser` library. The flow is redirect-based (no pop-ups) and initializes before the Vue app mounts.
+
+### 11.2 Bootstrap Sequence
+
+1. `main.ts` calls `useAuth().initialize()` **before** `createApp()`.
+2. `initialize()` calls `msalInstance.handleRedirectPromise()` to complete any in-flight redirect.
+3. If an account is found (from redirect or cache), it is set as the active account.
+4. The Vue app mounts, and the router auth guard determines whether to show the app or redirect to `/login`.
+
+### 11.3 Auth Composable (`useAuth`)
+
+```typescript
+interface UseAuth {
+  isInitialized: Ref<boolean>
+  isAuthenticated: ComputedRef<boolean>
+  account: Ref<AccountInfo | null>
+  userName: ComputedRef<string>
+  initialize(): Promise<void>
+  login(): Promise<void>          // Triggers MSAL redirect to Entra ID
+  logout(): Promise<void>         // Triggers MSAL redirect to post-logout URI
+  getAccessToken(): Promise<string>  // Silent token acquisition, falls back to redirect
+}
+```
+
+The composable uses module-level singletons for the MSAL instance and reactive state, so all components share the same auth state regardless of where `useAuth()` is called.
+
+### 11.4 Login View (`/login`)
+
+A centered card with the app logo, a brief message, and a "Sign in with Microsoft" button. Clicking the button calls `useAuth().login()`, which triggers the MSAL redirect flow to Entra ID. After successful login, the user is redirected back to the app and the router guard sends them to the originally requested page (via the `?redirect=` query param).
+
+### 11.5 TopBar Integration
+
+The `TopBar` component displays the authenticated user's name (from the Entra ID token claims) and a logout button (LogOut icon) on the right side of the header bar.
+
+### 11.6 Configuration
+
+| Variable | Provided via | Description |
+|----------|-------------|-------------|
+| `VITE_ENTRA_CLIENT_ID` | Vite env / Docker build arg | Entra ID app registration client ID |
+| `VITE_ENTRA_AUTHORITY` | Vite env / Docker build arg | Authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>` |
+
+When `VITE_ENTRA_CLIENT_ID` is empty, the MSAL instance is created with an empty client ID. In practice this means the redirect login will fail, but the router guard still enforces the login page. For local development, the backend should have `ENTRA_TENANT_ID` unset so API calls succeed without tokens.
+
+---
+
+## 12. Future Considerations
 
 - **Case timeline / activity log** -- a timeline of actions taken on a case (document added, status changed, etc.).
 - **DocumentElement collapsible list** -- browsable list of parsed elements grouped by page in the viewer panel.

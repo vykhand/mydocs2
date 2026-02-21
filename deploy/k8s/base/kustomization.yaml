@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yml
+  - configmap.yml
+  - pvc.yml
+  - backend-deployment.yml
+  - backend-service.yml
+  - ui-deployment.yml
+  - ui-service.yml
+  - ingress.yml
+
+# Note: secret.yml is NOT listed here.
+# Each overlay (or the operator) is responsible for creating the mydocs-secrets Secret.
+# See secret.yml.example for the required keys.

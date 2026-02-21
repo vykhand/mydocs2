@@ -77,7 +77,11 @@ COPY mydocs-ui/package.json mydocs-ui/package-lock.json ./
 RUN npm ci
 COPY mydocs-ui/ .
 ARG VITE_API_BASE_URL=/api/v1
+ARG VITE_ENTRA_CLIENT_ID=""
+ARG VITE_ENTRA_AUTHORITY=""
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_ENTRA_CLIENT_ID=${VITE_ENTRA_CLIENT_ID}
+ENV VITE_ENTRA_AUTHORITY=${VITE_ENTRA_AUTHORITY}
 RUN npm run build
 
 # Stage 2 -- serve
@@ -94,6 +98,8 @@ EXPOSE 80
 | Static files | `/usr/share/nginx/html` |
 | Health check | `GET /` returns `200` |
 | Build arg | `VITE_API_BASE_URL` (default `/api/v1`) |
+| Build arg | `VITE_ENTRA_CLIENT_ID` -- Entra ID app registration client ID (baked into SPA at build time) |
+| Build arg | `VITE_ENTRA_AUTHORITY` -- Entra ID authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>` |
 
 ### 2.3 Nginx Configuration (`deploy/nginx.conf`)
 
@@ -237,6 +243,8 @@ All secrets and configuration are supplied via `.env` file (not committed to git
 | `AZURE_DI_API_KEY` | `***` |
 | `AZURE_OPENAI_API_KEY` | `***` |
 | `AZURE_OPENAI_API_BASE` | `https://myoai.openai.azure.com` |
+| `ENTRA_TENANT_ID` | (empty to disable auth in local dev) |
+| `ENTRA_CLIENT_ID` | Entra ID app registration client ID |
 
 ### 4.3 Usage
 
@@ -258,9 +266,36 @@ docker compose down
 
 ## 5. Kubernetes Deployment
 
-### 5.1 Namespace
+Kubernetes manifests use a **Kustomize base + overlays** pattern. The base contains cloud-agnostic manifests with generic image references. Each deployment target adds an overlay that customizes images, ingress, TLS, and secrets for its environment.
 
-All resources live in a dedicated namespace:
+```
+deploy/k8s/
+  base/                         # Cloud-agnostic manifests
+    kustomization.yaml
+    namespace.yml, configmap.yml, pvc.yml, ...
+    secret.yml.example          # Template (not applied by Kustomize)
+  overlays/
+    self-hosted/                # Manual deploy to any K8s cluster
+      kustomization.yaml
+      secret.yml                # User-created (gitignored)
+    azure/                      # CI/CD deploy to Azure AKS
+      kustomization.yaml
+      ingress-patch.yml         # TLS + cert-manager
+```
+
+### 5.1 Deployment Targets
+
+| Target | How to deploy | Images from |
+|--------|--------------|-------------|
+| **Self-hosted** | `kubectl apply -k deploy/k8s/overlays/self-hosted/` | Any registry |
+| **Azure AKS** | Push to `azure-deployment` branch (CI/CD) | Azure Container Registry |
+| **Future targets** | Add new overlay + workflow | Target-specific registry |
+
+### 5.2 Base Manifests
+
+The base contains all resources common across deployment targets. Images use generic names (`mydocs-backend:latest`, `mydocs-ui:latest`) that Kustomize overlays or `kustomize edit set image` can transform.
+
+#### Namespace
 
 ```yaml
 apiVersion: v1
@@ -269,9 +304,9 @@ metadata:
   name: mydocs
 ```
 
-### 5.2 Secret
+#### Secret (template only)
 
-Sensitive configuration stored in a Kubernetes Secret:
+A `secret.yml.example` file documents the required keys. It is **not** listed in `kustomization.yaml` — each overlay manages secrets independently (self-hosted: user-created file; CI/CD: created from GitHub Secrets).
 
 ```yaml
 apiVersion: v1
@@ -281,17 +316,19 @@ metadata:
   namespace: mydocs
 type: Opaque
 stringData:
-  MONGO_URL: "mongodb+srv://cluster.mongodb.net"
-  MONGO_USER: "mydocs_user"
-  MONGO_PASSWORD: "***"
-  MONGO_DB_NAME: "mydocs"
-  AZURE_DI_ENDPOINT: "https://mydi.cognitiveservices.azure.com"
-  AZURE_DI_API_KEY: "***"
-  AZURE_OPENAI_API_KEY: "***"
-  AZURE_OPENAI_API_BASE: "https://myoai.openai.azure.com"
+  MONGO_URL: ""
+  MONGO_USER: ""
+  MONGO_PASSWORD: ""
+  MONGO_DB_NAME: ""
+  AZURE_DI_ENDPOINT: ""
+  AZURE_DI_API_KEY: ""
+  AZURE_OPENAI_API_KEY: ""
+  AZURE_OPENAI_API_BASE: ""
+  ENTRA_TENANT_ID: ""
+  ENTRA_CLIENT_ID: ""
 ```
 
-### 5.3 Backend Deployment
+#### Backend Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -355,7 +392,7 @@ spec:
             name: mydocs-config
 ```
 
-### 5.4 UI Deployment
+#### UI Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -392,7 +429,7 @@ spec:
               memory: 128Mi
 ```
 
-### 5.5 Services
+#### Services
 
 ```yaml
 apiVersion: v1
@@ -422,7 +459,9 @@ spec:
 
 The backend service name `backend` matches the Nginx upstream in the UI container, so `/api/` requests are proxied correctly via Kubernetes DNS (`backend.mydocs.svc.cluster.local`).
 
-### 5.6 Ingress
+#### Ingress (base)
+
+The base ingress is minimal — no TLS. Cloud-specific overlays patch in TLS and annotations.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -433,6 +472,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
 spec:
+  ingressClassName: nginx
   rules:
     - host: mydocs.example.com
       http:
@@ -446,7 +486,78 @@ spec:
                   number: 80
 ```
 
-All traffic enters through the UI Nginx, which handles SPA routing and reverse-proxies `/api/` to the backend service.
+### 5.3 Self-Hosted Overlay
+
+For deploying to any Kubernetes cluster (on-prem, Minikube, k3s, etc.) without CI/CD.
+
+```yaml
+# deploy/k8s/overlays/self-hosted/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - secret.yml    # Create from ../../base/secret.yml.example
+```
+
+Deploy:
+
+```bash
+# 1. Create secret from template
+cp deploy/k8s/base/secret.yml.example deploy/k8s/overlays/self-hosted/secret.yml
+# Edit secret.yml with your values
+
+# 2. (Optional) Set custom image registry
+cd deploy/k8s/overlays/self-hosted
+kustomize edit set image \
+  mydocs-backend=your-registry/mydocs-backend:TAG \
+  mydocs-ui=your-registry/mydocs-ui:TAG
+
+# 3. Apply
+kubectl apply -k deploy/k8s/overlays/self-hosted/
+```
+
+### 5.4 Azure AKS Overlay
+
+Used by the CI/CD pipeline. Patches the base ingress with TLS and cert-manager.
+
+```yaml
+# deploy/k8s/overlays/azure/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - path: ingress-patch.yml
+```
+
+```yaml
+# deploy/k8s/overlays/azure/ingress-patch.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mydocs-ingress
+  namespace: mydocs
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - mydocs.example.com
+      secretName: mydocs-tls
+```
+
+Images and secrets are set dynamically by CI/CD (see Section 8).
+
+### 5.5 Adding a New Cloud Target
+
+To add support for a new cloud (e.g., AWS EKS):
+
+1. Create `deploy/k8s/overlays/aws/kustomization.yaml` referencing `../../base`.
+2. Add any cloud-specific patches (e.g., ALB ingress annotations instead of nginx).
+3. Create `.github/workflows/deploy-eks.yml` following the Azure workflow as a template — swap `az` commands for `aws` commands, ACR for ECR, etc.
+4. Add a trigger branch (`aws-deployment`).
+
+All traffic enters through the UI Nginx, which handles SPA routing and reverse-proxies `/api/` to the backend service. TLS termination happens at the Ingress controller (configured per-overlay).
 
 ---
 
@@ -490,50 +601,274 @@ All traffic enters through the UI Nginx, which handles SPA routing and reverse-p
 
 ## 7. File Layout
 
-New files introduced by this spec:
+Files introduced by this spec:
 
 ```
-├── Dockerfile.backend          # Backend image build
-├── Dockerfile.ui               # UI image build (multi-stage with Nginx)
-├── docker-compose.yml          # Local / single-server deployment
+├── .github/
+│   └── workflows/
+│       └── deploy-aks.yml              # CI/CD: build → ACR → AKS
+├── Dockerfile.backend                  # Backend image build
+├── Dockerfile.ui                       # UI image build (multi-stage with Nginx)
+├── docker-compose.yml                  # Local / single-server deployment
 ├── deploy/
-│   ├── nginx.conf              # Nginx config for UI container
+│   ├── nginx.conf                      # Nginx config for UI container
 │   └── k8s/
-│       ├── namespace.yml
-│       ├── secret.yml
-│       ├── configmap.yml
-│       ├── pvc.yml
-│       ├── backend-deployment.yml
-│       ├── backend-service.yml
-│       ├── ui-deployment.yml
-│       ├── ui-service.yml
-│       └── ingress.yml
+│       ├── base/                       # Cloud-agnostic K8s manifests
+│       │   ├── kustomization.yaml
+│       │   ├── namespace.yml
+│       │   ├── configmap.yml
+│       │   ├── pvc.yml
+│       │   ├── backend-deployment.yml
+│       │   ├── backend-service.yml
+│       │   ├── ui-deployment.yml
+│       │   ├── ui-service.yml
+│       │   ├── ingress.yml
+│       │   └── secret.yml.example      # Template (not applied)
+│       └── overlays/
+│           ├── self-hosted/
+│           │   ├── kustomization.yaml
+│           │   ├── README.md
+│           │   └── secret.yml          # User-created (gitignored)
+│           └── azure/
+│               ├── kustomization.yaml
+│               └── ingress-patch.yml   # TLS + cert-manager
 ```
 
 ---
 
-## 8. Build and Publish
+## 8. CI/CD Pipeline
 
-Images are built and tagged with the git short SHA and `latest`:
+Each cloud target gets its own GitHub Actions workflow and trigger branch. Workflows follow a common pattern: build images → push to registry → deploy via Kustomize overlay.
+
+### 8.1 Multi-Target Strategy
+
+| Target | Trigger Branch | Workflow | Overlay |
+|--------|---------------|----------|---------|
+| **Azure AKS** | `azure-deployment` | `deploy-aks.yml` | `deploy/k8s/overlays/azure/` |
+| **AWS EKS** (future) | `aws-deployment` | `deploy-eks.yml` | `deploy/k8s/overlays/aws/` |
+| **Self-hosted** | n/a (manual) | n/a | `deploy/k8s/overlays/self-hosted/` |
+
+All workflows also support `workflow_dispatch` for manual one-off deploys with an optional image tag override.
+
+### 8.2 Azure AKS Pipeline (`deploy-aks.yml`)
+
+#### Trigger
+
+- **Push** to the `azure-deployment` branch (builds **and** deploys).
+- **Pull request** targeting the `azure-deployment` branch (builds only, no deploy).
+- **Manual dispatch** with optional image tag.
+
+#### Required Configuration
+
+**GitHub Secrets** (set in repository Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID` | Service principal or managed-identity client ID for Azure OIDC login |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `ENTRA_CLIENT_ID` | Entra ID app registration client ID (baked into UI at build time) |
+| `ENTRA_AUTHORITY` | Entra ID authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>` |
+| `MONGO_URL`, `MONGO_USER`, `MONGO_PASSWORD`, `MONGO_DB_NAME` | MongoDB connection details |
+| `AZURE_DI_ENDPOINT`, `AZURE_DI_API_KEY` | Azure Document Intelligence |
+| `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_BASE` | Azure OpenAI |
+| `MYDOCS_STORAGE_BACKEND` | `azure_blob` (recommended) or `local`. See Section 10. |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Azure Blob Storage account name (required when `MYDOCS_STORAGE_BACKEND=azure_blob`) |
+| `AZURE_STORAGE_CONTAINER_NAME` | Blob container name (default: `managed`) |
+
+**GitHub Variables** (set in repository Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `ACR_NAME` | `mydocsacr` | Azure Container Registry name (without `.azurecr.io`) |
+| `AKS_CLUSTER_NAME` | `mydocs-aks` | AKS cluster name |
+| `AKS_RESOURCE_GROUP` | `mydocs-rg` | Resource group containing the AKS cluster |
+
+#### Pipeline Stages
+
+```
+push to azure-deployment
+        │
+        ▼
+┌───────────────────────────────┐
+│  Build Job                    │
+│  1. Checkout                  │
+│  2. Azure Login (OIDC)        │
+│  3. ACR Login                 │
+│  4. Build & push backend      │
+│     image (SHA + latest)      │
+│  5. Build & push UI image     │
+│     (SHA + latest, with       │
+│      VITE_ENTRA_* args)       │
+└───────────┬───────────────────┘
+            │ (push only, not on PR)
+            ▼
+┌───────────────────────────────┐
+│  Deploy Job                   │
+│  1. Azure Login (OIDC)        │
+│  2. Get AKS credentials       │
+│  3. Create K8s secret from    │
+│     GitHub Secrets             │
+│  4. kustomize edit set image  │
+│     (stamp ACR + SHA tag)     │
+│  5. kubectl apply -k overlay  │
+│  6. Wait for rollout          │
+└───────────────────────────────┘
+```
+
+The deploy job uses `kustomize edit set image` to stamp the correct ACR registry and commit SHA into the overlay, then applies with `kubectl apply -k`. Secrets are created idempotently from GitHub Secrets via `kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`.
+
+### 8.4 Manual / Local Builds
+
+Images can also be built and tagged locally:
 
 ```bash
 # Backend
 docker build -f Dockerfile.backend -t mydocs-backend:$(git rev-parse --short HEAD) .
-docker tag mydocs-backend:$(git rev-parse --short HEAD) mydocs-backend:latest
 
-# UI
-docker build -f Dockerfile.ui -t mydocs-ui:$(git rev-parse --short HEAD) .
-docker tag mydocs-ui:$(git rev-parse --short HEAD) mydocs-ui:latest
+# UI (with OAuth build args)
+docker build -f Dockerfile.ui \
+  --build-arg VITE_ENTRA_CLIENT_ID=<client-id> \
+  --build-arg VITE_ENTRA_AUTHORITY=https://login.microsoftonline.com/<tenant-id> \
+  -t mydocs-ui:$(git rev-parse --short HEAD) .
 ```
-
-CI/CD pipeline (GitHub Actions, out of scope for this spec) would push images to a container registry and update the K8s manifests with the new tag.
 
 ---
 
-## 9. Scaling Considerations
+## 9. Authentication
+
+Authentication is implemented using **Microsoft Entra ID** (Azure AD) with an OAuth 2.0 / OpenID Connect flow.
+
+### 9.1 Architecture
+
+```
+┌──────────┐     MSAL redirect     ┌─────────────────┐
+│  Browser  │ ◄──────────────────► │  Entra ID       │
+│  (Vue SPA)│    access_token       │  (login.ms.com) │
+└─────┬─────┘                       └─────────────────┘
+      │ Authorization: Bearer <token>
+      ▼
+┌─────────────┐
+│  Backend    │ ── validates JWT signature via Entra JWKS
+│  (FastAPI)  │
+└─────────────┘
+```
+
+1. The **Vue UI** uses `@azure/msal-browser` to perform a redirect-based login against Entra ID and obtain an access token.
+2. Every API request includes the token in the `Authorization: Bearer <token>` header.
+3. The **FastAPI backend** validates the JWT signature, audience, issuer, and expiry using Entra's public JWKS keys.
+4. The `/health` endpoint remains **unauthenticated** so Kubernetes probes work without tokens.
+
+### 9.2 Local Development
+
+When `ENTRA_TENANT_ID` is **unset or empty**, the backend skips token validation entirely and returns a stub user (`local-dev`). The UI will also skip the login redirect when `VITE_ENTRA_CLIENT_ID` is empty. This allows the application to run without any Entra ID configuration during local development.
+
+### 9.3 Configuration
+
+| Layer | Variable | Description |
+|-------|----------|-------------|
+| Backend (env) | `ENTRA_TENANT_ID` | Azure AD tenant ID. Empty = auth disabled. |
+| Backend (env) | `ENTRA_CLIENT_ID` | App registration client ID (audience for token validation). |
+| Backend (env) | `ENTRA_ISSUER` | (Optional) Token issuer URL. Defaults to `https://login.microsoftonline.com/{tenant_id}/v2.0`. |
+| UI (build arg) | `VITE_ENTRA_CLIENT_ID` | Same client ID, baked into the SPA at build time. |
+| UI (build arg) | `VITE_ENTRA_AUTHORITY` | Authority URL, e.g. `https://login.microsoftonline.com/<tenant-id>`. |
+
+---
+
+## 10. Storage Modes × Deployment Targets
+
+The application has two orthogonal storage concepts:
+
+- **Storage mode** (`managed` vs `external`) — whether the file is copied into managed storage or stays at its original path.
+- **Storage backend** (`local` vs `azure_blob`) — where managed storage physically lives.
+
+Different deployment targets have different constraints on which combinations are practical.
+
+### 10.1 Compatibility Matrix
+
+| Storage Backend | Storage Mode | Docker Compose | Self-hosted K8s | Azure AKS |
+|-----------------|-------------|----------------|-----------------|-----------|
+| `local` | managed | Best fit. Bind-mount gives host access for debugging. | Works with `ReadWriteOnce` PVC. **Limits backend to 1 replica.** | Works but PVC-bound. Not recommended — use `azure_blob`. |
+| `local` | external | Works if external paths are bind-mounted into the container. | Requires additional volume mounts for external paths. Must be configured per-cluster. | Impractical — external paths from other machines aren't accessible inside AKS pods. |
+| `azure_blob` | managed | Works. Files go to Azure Blob — no local data volume needed for managed files. Config and DI cache still use local volume. | Eliminates PVC scaling limitation. **Backend scales to multiple replicas.** Config volume still needed. | **Recommended.** Uses managed identity. Eliminates PVC for file storage. Scales horizontally. |
+| `azure_blob` | external | External files remain local. Sidecars written locally next to originals. Blob backend only used for managed sidecar storage during migration. | Same as Docker Compose — external paths need volume mounts. | Not practical. External paths not accessible from AKS pods. |
+
+### 10.2 Recommended Configurations
+
+| Deployment Target | Recommended Backend | Notes |
+|-------------------|-------------------|-------|
+| **Docker Compose** (local dev) | `local` | Simplest. No cloud credentials needed. Both storage modes work. |
+| **Docker Compose** (staging) | `azure_blob` | Mirrors production. Use connection string or Azurite emulator. |
+| **Self-hosted K8s** (single replica) | `local` | PVC is sufficient. Simple to operate. |
+| **Self-hosted K8s** (multi-replica) | `azure_blob` | Avoids `ReadWriteMany` PVC requirement. |
+| **Azure AKS** | `azure_blob` | Native fit. Uses managed identity. No PVC for files. |
+
+### 10.3 External Mode Limitations in Kubernetes
+
+External storage mode (`storage_mode: external`) assumes the backend process can read files at their original filesystem paths. This works in Docker Compose (with bind mounts) but has significant limitations in Kubernetes:
+
+- **Original paths must be accessible** from inside the pod via additional volume mounts (NFS, hostPath, Azure Files, etc.).
+- **K8s manifests do not include** external path volume mounts — operators must add them manually.
+- **Not supported in CI/CD deployments** (Azure AKS) — use managed mode instead.
+
+For Kubernetes deployments, the recommended workflow is:
+1. Ingest files via the **upload endpoint** (always uses managed mode) or the **ingest endpoint** with `storage_mode: managed`.
+2. If migrating from a local deployment that used external mode, use `sync migrate` to move files to managed storage first.
+
+### 10.4 PVC Requirements by Backend
+
+| Backend | PVC at `/app/data` | Purpose |
+|---------|-------------------|---------|
+| `local` | **Required** | Managed files, uploads, DI cache, sidecars |
+| `azure_blob` | **Optional but recommended** | DI cache files (`.di.json`), uploads staging area, config |
+
+When using `azure_blob`, the PVC can be smaller (e.g. 2Gi instead of 10Gi) since managed files live in Blob Storage. The PVC is still useful for:
+- Temporary upload staging (`DATA_FOLDER/uploads/`)
+- DI cache files written during parsing (`.di.json` alongside managed files — on local backend these go to disk, on `azure_blob` they are not persisted unless explicitly handled)
+- Configuration files mounted via ConfigMap
+
+### 10.5 Migrating Between Backends
+
+When changing deployment targets (e.g. Docker Compose → AKS), file storage may need to migrate between backends. Use the `sync migrate` command or API:
+
+```bash
+# CLI: migrate local → azure_blob
+mydocs sync migrate --from local --to azure_blob
+
+# API: build plan first, then execute
+POST /api/v1/sync/migrate/plan   {"source_backend": "local", "target_backend": "azure_blob"}
+POST /api/v1/sync/migrate/execute {"source_backend": "local", "target_backend": "azure_blob"}
+```
+
+Migration is storage-only — no database writes. After migration, rebuild the DB from the target backend's sidecars:
+
+```bash
+mydocs sync run --backend azure_blob
+```
+
+See [sync.md](sync.md) Section 4.4 for the full migration algorithm.
+
+### 10.6 Azure AKS with Azure Blob Storage
+
+When deploying to Azure AKS with the `azure_blob` backend, the following additional secrets are required:
+
+| Secret | Description |
+|--------|-------------|
+| `MYDOCS_STORAGE_BACKEND` | Set to `azure_blob` |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Storage account name |
+| `AZURE_STORAGE_CONTAINER_NAME` | Blob container name (default: `managed`) |
+
+Authentication options (pick one):
+- **Managed identity** (recommended): Set only `AZURE_STORAGE_ACCOUNT_NAME`. The AKS pod's workload identity authenticates via `DefaultAzureCredential`.
+- **Account key**: Set `AZURE_STORAGE_ACCOUNT_KEY` in addition to account name.
+- **Connection string**: Set `AZURE_STORAGE_CONNECTION_STRING` instead.
+
+---
+
+## 11. Scaling Considerations
 
 | Component | Scalability Notes |
 |-----------|-------------------|
 | **UI** | Stateless -- scale horizontally without restriction. |
-| **Backend** | Stateless for read operations. Write operations (file uploads) require `ReadWriteMany` PVC or shared storage (e.g. NFS, Azure Files) if replicas > 1. With `ReadWriteOnce`, limit to 1 replica or use a shared storage backend. |
-| **Storage** | Local PVC is `ReadWriteOnce`. For multi-replica backends, switch to `ReadWriteMany`-capable storage class or migrate to a cloud storage backend (Azure Blob, S3 -- planned P1/P2). |
+| **Backend** | Stateless for read operations. Write operations (file uploads) require `ReadWriteMany` PVC or shared storage (e.g. NFS, Azure Files) if replicas > 1 with `local` backend. With `azure_blob` backend, scales horizontally without PVC concerns. |
+| **Storage** | `local` backend: PVC is `ReadWriteOnce` — limit to 1 replica or switch to `ReadWriteMany` storage class. `azure_blob` backend: no PVC scaling limitation — recommended for multi-replica deployments. |
