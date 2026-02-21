@@ -613,6 +613,72 @@ kubectl rollout undo deployment/ui -n mydocs
 
 ---
 
+## 6. Storage Backend Selection
+
+The application supports two storage backends for managed files. The choice of backend interacts with the deployment target:
+
+### 6.1 Which Backend to Use
+
+| Deployment Target | Recommended Backend | Why |
+|-------------------|-------------------|-----|
+| **Docker Compose** (local dev) | `local` | Simplest. Files on host via bind mount. No cloud credentials. |
+| **Docker Compose** (staging) | `azure_blob` | Mirrors production. Use Azurite emulator or real storage account. |
+| **Self-hosted K8s** (1 replica) | `local` | PVC is sufficient. Simple to operate. |
+| **Self-hosted K8s** (multi-replica) | `azure_blob` | Avoids `ReadWriteMany` PVC requirement. |
+| **Azure AKS** | `azure_blob` | Native fit. Uses managed identity. No PVC for files. Scales horizontally. |
+
+### 6.2 Impact on PVC
+
+| Backend | PVC at `/app/data` | Size Guidance |
+|---------|-------------------|---------------|
+| `local` | **Required** — stores all managed files, uploads, sidecars, DI cache | 10Gi+ depending on document volume |
+| `azure_blob` | **Optional** — only for upload staging and DI cache | 2Gi is typically sufficient |
+
+### 6.3 Impact on Ingestion Mode
+
+| Ingestion Mode | `local` backend | `azure_blob` backend |
+|---------------|-----------------|---------------------|
+| **Managed** (upload/ingest) | Files copied to PVC `/app/data/managed/` | Files uploaded to Blob container |
+| **External** (ingest with path) | Original path must be accessible from container | Original path must be accessible from container (impractical in AKS — use managed mode) |
+
+**Recommendation for K8s/AKS**: Always use managed mode. Use the upload endpoint (`POST /api/v1/documents/upload`) or ingest with `storage_mode: managed`. External mode requires manual volume mounts for the original file paths.
+
+### 6.4 Migrating Between Backends
+
+When moving from Docker Compose (local) to AKS (azure_blob), migrate existing files:
+
+```bash
+# Via CLI
+mydocs sync migrate --from local --to azure_blob --dry-run   # preview
+mydocs sync migrate --from local --to azure_blob              # execute
+
+# Via API
+POST /api/v1/sync/migrate/plan    {"source_backend": "local", "target_backend": "azure_blob"}
+POST /api/v1/sync/migrate/execute {"source_backend": "local", "target_backend": "azure_blob"}
+```
+
+After migration, rebuild the database from the target backend:
+
+```bash
+mydocs sync run
+```
+
+Migration is idempotent — re-running skips files already on the target. Use `--delete-source` to clean up source files after a successful migration.
+
+### 6.5 AKS GitHub Secrets for Azure Blob Storage
+
+When using `azure_blob` backend with AKS CI/CD, add these GitHub Secrets:
+
+| Secret | Value | Notes |
+|--------|-------|-------|
+| `MYDOCS_STORAGE_BACKEND` | `azure_blob` | Enables Blob backend |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Your storage account name | Required |
+| `AZURE_STORAGE_CONTAINER_NAME` | `managed` (or custom) | Container for managed files |
+
+Authentication: The AKS pod's workload identity authenticates via `DefaultAzureCredential`. Ensure the pod identity has `Storage Blob Data Contributor` role on the storage account. Alternatively, set `AZURE_STORAGE_ACCOUNT_KEY` as a GitHub Secret for key-based auth.
+
+---
+
 ## Appendix: Environment Variable Reference
 
 | Variable | Required | Default | Used By | Description |

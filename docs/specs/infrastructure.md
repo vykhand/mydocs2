@@ -672,6 +672,9 @@ All workflows also support `workflow_dispatch` for manual one-off deploys with a
 | `MONGO_URL`, `MONGO_USER`, `MONGO_PASSWORD`, `MONGO_DB_NAME` | MongoDB connection details |
 | `AZURE_DI_ENDPOINT`, `AZURE_DI_API_KEY` | Azure Document Intelligence |
 | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_BASE` | Azure OpenAI |
+| `MYDOCS_STORAGE_BACKEND` | `azure_blob` (recommended) or `local`. See Section 10. |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Azure Blob Storage account name (required when `MYDOCS_STORAGE_BACKEND=azure_blob`) |
+| `AZURE_STORAGE_CONTAINER_NAME` | Blob container name (default: `managed`) |
 
 **GitHub Variables** (set in repository Settings → Secrets and variables → Actions → Variables):
 
@@ -772,10 +775,100 @@ When `ENTRA_TENANT_ID` is **unset or empty**, the backend skips token validation
 
 ---
 
-## 10. Scaling Considerations
+## 10. Storage Modes × Deployment Targets
+
+The application has two orthogonal storage concepts:
+
+- **Storage mode** (`managed` vs `external`) — whether the file is copied into managed storage or stays at its original path.
+- **Storage backend** (`local` vs `azure_blob`) — where managed storage physically lives.
+
+Different deployment targets have different constraints on which combinations are practical.
+
+### 10.1 Compatibility Matrix
+
+| Storage Backend | Storage Mode | Docker Compose | Self-hosted K8s | Azure AKS |
+|-----------------|-------------|----------------|-----------------|-----------|
+| `local` | managed | Best fit. Bind-mount gives host access for debugging. | Works with `ReadWriteOnce` PVC. **Limits backend to 1 replica.** | Works but PVC-bound. Not recommended — use `azure_blob`. |
+| `local` | external | Works if external paths are bind-mounted into the container. | Requires additional volume mounts for external paths. Must be configured per-cluster. | Impractical — external paths from other machines aren't accessible inside AKS pods. |
+| `azure_blob` | managed | Works. Files go to Azure Blob — no local data volume needed for managed files. Config and DI cache still use local volume. | Eliminates PVC scaling limitation. **Backend scales to multiple replicas.** Config volume still needed. | **Recommended.** Uses managed identity. Eliminates PVC for file storage. Scales horizontally. |
+| `azure_blob` | external | External files remain local. Sidecars written locally next to originals. Blob backend only used for managed sidecar storage during migration. | Same as Docker Compose — external paths need volume mounts. | Not practical. External paths not accessible from AKS pods. |
+
+### 10.2 Recommended Configurations
+
+| Deployment Target | Recommended Backend | Notes |
+|-------------------|-------------------|-------|
+| **Docker Compose** (local dev) | `local` | Simplest. No cloud credentials needed. Both storage modes work. |
+| **Docker Compose** (staging) | `azure_blob` | Mirrors production. Use connection string or Azurite emulator. |
+| **Self-hosted K8s** (single replica) | `local` | PVC is sufficient. Simple to operate. |
+| **Self-hosted K8s** (multi-replica) | `azure_blob` | Avoids `ReadWriteMany` PVC requirement. |
+| **Azure AKS** | `azure_blob` | Native fit. Uses managed identity. No PVC for files. |
+
+### 10.3 External Mode Limitations in Kubernetes
+
+External storage mode (`storage_mode: external`) assumes the backend process can read files at their original filesystem paths. This works in Docker Compose (with bind mounts) but has significant limitations in Kubernetes:
+
+- **Original paths must be accessible** from inside the pod via additional volume mounts (NFS, hostPath, Azure Files, etc.).
+- **K8s manifests do not include** external path volume mounts — operators must add them manually.
+- **Not supported in CI/CD deployments** (Azure AKS) — use managed mode instead.
+
+For Kubernetes deployments, the recommended workflow is:
+1. Ingest files via the **upload endpoint** (always uses managed mode) or the **ingest endpoint** with `storage_mode: managed`.
+2. If migrating from a local deployment that used external mode, use `sync migrate` to move files to managed storage first.
+
+### 10.4 PVC Requirements by Backend
+
+| Backend | PVC at `/app/data` | Purpose |
+|---------|-------------------|---------|
+| `local` | **Required** | Managed files, uploads, DI cache, sidecars |
+| `azure_blob` | **Optional but recommended** | DI cache files (`.di.json`), uploads staging area, config |
+
+When using `azure_blob`, the PVC can be smaller (e.g. 2Gi instead of 10Gi) since managed files live in Blob Storage. The PVC is still useful for:
+- Temporary upload staging (`DATA_FOLDER/uploads/`)
+- DI cache files written during parsing (`.di.json` alongside managed files — on local backend these go to disk, on `azure_blob` they are not persisted unless explicitly handled)
+- Configuration files mounted via ConfigMap
+
+### 10.5 Migrating Between Backends
+
+When changing deployment targets (e.g. Docker Compose → AKS), file storage may need to migrate between backends. Use the `sync migrate` command or API:
+
+```bash
+# CLI: migrate local → azure_blob
+mydocs sync migrate --from local --to azure_blob
+
+# API: build plan first, then execute
+POST /api/v1/sync/migrate/plan   {"source_backend": "local", "target_backend": "azure_blob"}
+POST /api/v1/sync/migrate/execute {"source_backend": "local", "target_backend": "azure_blob"}
+```
+
+Migration is storage-only — no database writes. After migration, rebuild the DB from the target backend's sidecars:
+
+```bash
+mydocs sync run --backend azure_blob
+```
+
+See [sync.md](sync.md) Section 4.4 for the full migration algorithm.
+
+### 10.6 Azure AKS with Azure Blob Storage
+
+When deploying to Azure AKS with the `azure_blob` backend, the following additional secrets are required:
+
+| Secret | Description |
+|--------|-------------|
+| `MYDOCS_STORAGE_BACKEND` | Set to `azure_blob` |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Storage account name |
+| `AZURE_STORAGE_CONTAINER_NAME` | Blob container name (default: `managed`) |
+
+Authentication options (pick one):
+- **Managed identity** (recommended): Set only `AZURE_STORAGE_ACCOUNT_NAME`. The AKS pod's workload identity authenticates via `DefaultAzureCredential`.
+- **Account key**: Set `AZURE_STORAGE_ACCOUNT_KEY` in addition to account name.
+- **Connection string**: Set `AZURE_STORAGE_CONNECTION_STRING` instead.
+
+---
+
+## 11. Scaling Considerations
 
 | Component | Scalability Notes |
 |-----------|-------------------|
 | **UI** | Stateless -- scale horizontally without restriction. |
-| **Backend** | Stateless for read operations. Write operations (file uploads) require `ReadWriteMany` PVC or shared storage (e.g. NFS, Azure Files) if replicas > 1. With `ReadWriteOnce`, limit to 1 replica or use a shared storage backend. |
-| **Storage** | Local PVC is `ReadWriteOnce`. For multi-replica backends, switch to `ReadWriteMany`-capable storage class or migrate to a cloud storage backend (Azure Blob, S3 -- planned P1/P2). |
+| **Backend** | Stateless for read operations. Write operations (file uploads) require `ReadWriteMany` PVC or shared storage (e.g. NFS, Azure Files) if replicas > 1 with `local` backend. With `azure_blob` backend, scales horizontally without PVC concerns. |
+| **Storage** | `local` backend: PVC is `ReadWriteOnce` — limit to 1 replica or switch to `ReadWriteMany` storage class. `azure_blob` backend: no PVC scaling limitation — recommended for multi-replica deployments. |
