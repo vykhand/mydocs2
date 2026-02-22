@@ -1,6 +1,5 @@
 """Microsoft Entra ID (Azure AD) JWT validation for FastAPI."""
 
-import logging
 import os
 from typing import Any
 
@@ -8,8 +7,9 @@ import httpx
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from tinystructlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -103,18 +103,13 @@ async def get_current_user(
     # produces tokens with aud=api://{client_id}.
     valid_audiences = [client_id, f"api://{client_id}"]
 
-    # Log token claims (without signature) for debugging
-    try:
-        unverified = jwt.decode(token, options={"verify_signature": False})
-        logger.warning(
-            "JWT debug — iss: %s, aud: %s, expected_iss: %s, expected_aud: %s",
-            unverified.get("iss"),
-            unverified.get("aud"),
-            issuer,
-            valid_audiences,
-        )
-    except Exception:
-        pass
+    # Accept both v1 (sts.windows.net) and v2 (login.microsoftonline.com)
+    # issuer formats. Token version depends on the app manifest's
+    # accessTokenAcceptedVersion setting.
+    valid_issuers = [
+        issuer,
+        f"https://sts.windows.net/{tenant_id}/",
+    ]
 
     try:
         payload = jwt.decode(
@@ -122,7 +117,7 @@ async def get_current_user(
             public_key,
             algorithms=["RS256"],
             audience=valid_audiences,
-            issuer=issuer,
+            issuer=valid_issuers,
             options={"require": ["exp", "iss", "aud"]},
         )
     except jwt.ExpiredSignatureError:
