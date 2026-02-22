@@ -1,5 +1,6 @@
 """Microsoft Entra ID (Azure AD) JWT validation for FastAPI."""
 
+import logging
 import os
 from typing import Any
 
@@ -7,6 +8,8 @@ import httpx
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+logger = logging.getLogger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -100,6 +103,19 @@ async def get_current_user(
     # produces tokens with aud=api://{client_id}.
     valid_audiences = [client_id, f"api://{client_id}"]
 
+    # Log token claims (without signature) for debugging
+    try:
+        unverified = jwt.decode(token, options={"verify_signature": False})
+        logger.warning(
+            "JWT debug — iss: %s, aud: %s, expected_iss: %s, expected_aud: %s",
+            unverified.get("iss"),
+            unverified.get("aud"),
+            issuer,
+            valid_audiences,
+        )
+    except Exception:
+        pass
+
     try:
         payload = jwt.decode(
             token,
@@ -115,6 +131,7 @@ async def get_current_user(
             detail="Token has expired",
         )
     except jwt.InvalidTokenError as exc:
+        logger.warning("JWT validation failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token validation failed: {exc}",
