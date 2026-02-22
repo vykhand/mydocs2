@@ -4,8 +4,9 @@ kind: Kustomization
 resources:
   - ../../base
 
-patches:
-  - path: ingress-patch.yml
+# TLS patch disabled — re-enable when cert-manager + custom domain are set up
+# patches:
+#   - path: ingress-patch.yml
 
 # Images are set dynamically by CI/CD:
 #   cd deploy/k8s/overlays/azure
