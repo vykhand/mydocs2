@@ -95,12 +95,17 @@ async def get_current_user(
 
     public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
 
+    # Accept both the raw client ID and the Application ID URI as valid
+    # audiences. MSAL SPA requests api://{client_id}/access_as_user which
+    # produces tokens with aud=api://{client_id}.
+    valid_audiences = [client_id, f"api://{client_id}"]
+
     try:
         payload = jwt.decode(
             token,
             public_key,
             algorithms=["RS256"],
-            audience=client_id,
+            audience=valid_audiences,
             issuer=issuer,
             options={"require": ["exp", "iss", "aud"]},
         )
