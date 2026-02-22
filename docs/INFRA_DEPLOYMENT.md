@@ -156,9 +156,9 @@ The Azure Blob Storage variables reflect features already implemented ahead of t
 
 The docker-compose.yml uses `DATA_FOLDER` and `CONFIG_ROOT` (matching the spec), while `.env.example` uses `MYDOCS_DATA_FOLDER` and `MYDOCS_CONFIG_ROOT`. The backend likely supports both; the compose file explicitly sets the non-prefixed names.
 
-### 2.5 Secret Template — Consistent with Spec
+### 2.5 Secret Template — Superset of Spec
 
-The `secret.yml.example` includes exactly the 10 keys documented in the spec (Section 5.2). No deviation.
+The `secret.yml.example` includes the 10 keys documented in the spec (Section 5.2) plus 3 additional storage backend variables (`MYDOCS_STORAGE_BACKEND`, `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_STORAGE_CONTAINER_NAME`) for Azure Blob Storage support. Two more options (`AZURE_STORAGE_ACCOUNT_KEY`, `AZURE_STORAGE_CONNECTION_STRING`) are present as comments. This reflects the storage features implemented ahead of the spec's P1/P2 roadmap.
 
 ### 2.6 CI/CD Pipeline — Consistent with Spec
 
