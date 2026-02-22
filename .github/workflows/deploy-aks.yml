@@ -107,6 +107,7 @@ jobs:
             --from-literal=ENTRA_CLIENT_ID="${{ secrets.ENTRA_CLIENT_ID }}" \
             --from-literal=MYDOCS_STORAGE_BACKEND="${{ secrets.MYDOCS_STORAGE_BACKEND }}" \
             --from-literal=AZURE_STORAGE_ACCOUNT_NAME="${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}" \
+            --from-literal=AZURE_STORAGE_ACCOUNT_KEY="${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}" \
             --from-literal=AZURE_STORAGE_CONTAINER_NAME="${{ secrets.AZURE_STORAGE_CONTAINER_NAME }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
