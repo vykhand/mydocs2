@@ -9,6 +9,7 @@ import { useToast } from 'vue-toastification'
 import App from './App.vue'
 import router from './router'
 import './assets/main.css'
+import { useAuth } from './auth/useAuth'
 
 const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate)
@@ -22,16 +23,23 @@ const toastOptions: PluginOptions = {
   showCloseButtonOnHover: true,
 }
 
-const app = createApp(App)
-app.use(pinia)
-app.use(router)
-app.use(Toast, toastOptions)
+async function bootstrap() {
+  const { initialize } = useAuth()
+  await initialize()
 
-app.config.errorHandler = (err) => {
-  console.error('Unhandled error:', err)
-  const toast = useToast()
-  const message = err instanceof Error ? err.message : 'An unexpected error occurred'
-  toast.error(message)
+  const app = createApp(App)
+  app.use(pinia)
+  app.use(router)
+  app.use(Toast, toastOptions)
+
+  app.config.errorHandler = (err) => {
+    console.error('Unhandled error:', err)
+    const toast = useToast()
+    const message = err instanceof Error ? err.message : 'An unexpected error occurred'
+    toast.error(message)
+  }
+
+  app.mount('#app')
 }
 
-app.mount('#app')
+bootstrap()

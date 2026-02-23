@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# TLS patch disabled — re-enable when cert-manager + custom domain are set up
+# patches:
+#   - path: ingress-patch.yml
+
+# Images are set dynamically by CI/CD:
+#   cd deploy/k8s/overlays/azure
+#   kustomize edit set image \
+#     mydocs-backend=myacr.azurecr.io/mydocs-backend:SHA \
+#     mydocs-ui=myacr.azurecr.io/mydocs-ui:SHA
+#   kubectl apply -k .
+#
+# Secrets are created by CI/CD via:
+#   kubectl create secret generic mydocs-secrets ... --dry-run=client -o yaml | kubectl apply -f -

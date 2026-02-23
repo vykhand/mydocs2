@@ -208,6 +208,9 @@ __marimo__/
 # IDEA
 .idea/
 
+# Kubernetes overlay secrets (user-managed, contain credentials)
+deploy/k8s/overlays/*/secret.yml
+
 #CLAUDE
 .claude/
 data/**

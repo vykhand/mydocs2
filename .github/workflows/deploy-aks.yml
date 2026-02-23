@@ -1,0 +1,134 @@
+name: Deploy to Azure AKS
+
+on:
+  push:
+    branches: [azure-deployment]
+  pull_request:
+    branches: [azure-deployment]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: commit SHA)"
+        required: false
+
+env:
+  ACR_NAME: ${{ vars.ACR_NAME }}                 # e.g. mydocsacr
+  ACR_LOGIN_SERVER: ${{ vars.ACR_NAME }}.azurecr.io
+  AKS_CLUSTER: ${{ vars.AKS_CLUSTER_NAME }}      # e.g. mydocs-aks
+  AKS_RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
+  K8S_NAMESPACE: mydocs
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || github.sha }}
+  OVERLAY_DIR: deploy/k8s/overlays/azure
+
+jobs:
+  # ── Build & push Docker images ────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # needed for OIDC login to Azure
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build & push backend image
+        run: |
+          docker build -f Dockerfile.backend \
+            -t "$ACR_LOGIN_SERVER/mydocs-backend:$IMAGE_TAG" \
+            -t "$ACR_LOGIN_SERVER/mydocs-backend:latest" \
+            .
+          docker push "$ACR_LOGIN_SERVER/mydocs-backend" --all-tags
+
+      - name: Build & push UI image
+        run: |
+          docker build -f Dockerfile.ui \
+            --build-arg VITE_API_BASE_URL=/api/v1 \
+            --build-arg VITE_ENTRA_CLIENT_ID=${{ secrets.ENTRA_CLIENT_ID }} \
+            --build-arg VITE_ENTRA_AUTHORITY=${{ secrets.ENTRA_AUTHORITY }} \
+            -t "$ACR_LOGIN_SERVER/mydocs-ui:$IMAGE_TAG" \
+            -t "$ACR_LOGIN_SERVER/mydocs-ui:latest" \
+            .
+          docker push "$ACR_LOGIN_SERVER/mydocs-ui" --all-tags
+
+  # ── Deploy to AKS ─────────────────────────────────────────────────────
+  deploy:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "$AKS_RESOURCE_GROUP" \
+            --name "$AKS_CLUSTER" \
+            --overwrite-existing
+
+      - name: Create namespace (idempotent)
+        run: kubectl apply -f deploy/k8s/base/namespace.yml
+
+      - name: Create/update secrets from GitHub secrets
+        run: |
+          kubectl create secret generic mydocs-secrets \
+            --namespace="$K8S_NAMESPACE" \
+            --from-literal=MONGO_URL="${{ secrets.MONGO_URL }}" \
+            --from-literal=MONGO_USER="${{ secrets.MONGO_USER }}" \
+            --from-literal=MONGO_PASSWORD="${{ secrets.MONGO_PASSWORD }}" \
+            --from-literal=MONGO_DB_NAME="${{ secrets.MONGO_DB_NAME }}" \
+            --from-literal=AZURE_DI_ENDPOINT="${{ secrets.AZURE_DI_ENDPOINT }}" \
+            --from-literal=AZURE_DI_API_KEY="${{ secrets.AZURE_DI_API_KEY }}" \
+            --from-literal=AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
+            --from-literal=AZURE_OPENAI_API_BASE="${{ secrets.AZURE_OPENAI_API_BASE }}" \
+            --from-literal=ENTRA_TENANT_ID="${{ secrets.ENTRA_TENANT_ID }}" \
+            --from-literal=ENTRA_CLIENT_ID="${{ secrets.ENTRA_CLIENT_ID }}" \
+            --from-literal=MYDOCS_STORAGE_BACKEND="${{ secrets.MYDOCS_STORAGE_BACKEND }}" \
+            --from-literal=AZURE_STORAGE_ACCOUNT_NAME="${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}" \
+            --from-literal=AZURE_STORAGE_ACCOUNT_KEY="${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}" \
+            --from-literal=AZURE_STORAGE_CONTAINER_NAME="${{ secrets.AZURE_STORAGE_CONTAINER_NAME }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Set image tags in overlay
+        run: |
+          cd "$OVERLAY_DIR"
+          kustomize edit set image \
+            mydocs-backend="$ACR_LOGIN_SERVER/mydocs-backend:$IMAGE_TAG" \
+            mydocs-ui="$ACR_LOGIN_SERVER/mydocs-ui:$IMAGE_TAG"
+
+      - name: Apply with Kustomize
+        run: kubectl apply -k "$OVERLAY_DIR"
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/backend -n "$K8S_NAMESPACE" --timeout=300s
+          kubectl rollout status deployment/ui -n "$K8S_NAMESPACE" --timeout=300s
+
+      - name: Deployment summary
+        run: |
+          echo "### Deployment complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Backend:** $ACR_LOGIN_SERVER/mydocs-backend:$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **UI:** $ACR_LOGIN_SERVER/mydocs-ui:$IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Cluster:** $AKS_CLUSTER ($AKS_RESOURCE_GROUP)" >> "$GITHUB_STEP_SUMMARY"
