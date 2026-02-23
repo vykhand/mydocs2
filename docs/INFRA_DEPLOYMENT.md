@@ -1,6 +1,6 @@
 # Infrastructure & Deployment Guide
 
-**Last updated**: 2026-02-21
+**Last updated**: 2026-02-23
 **Spec reference**: [docs/specs/infrastructure.md](docs/specs/infrastructure.md)
 
 ---
@@ -457,39 +457,294 @@ kubectl apply -k .
 
 ### 5.1 Prerequisites
 
-**Azure Resources** (must be created beforehand):
+**Local tools**:
 
-- An Azure Kubernetes Service (AKS) cluster
-- An Azure Container Registry (ACR), attached to the AKS cluster
-- A service principal or managed identity with:
-  - `AcrPush` role on the ACR
-  - `Azure Kubernetes Service Cluster User Role` on the AKS cluster
-- Federated credential configured for GitHub OIDC (for passwordless auth)
-- (Optional) A DNS record pointing to the AKS ingress controller's external IP
-- (Optional) cert-manager installed in the cluster with a `letsencrypt-prod` ClusterIssuer
+- Azure CLI (`brew install azure-cli` on macOS)
+- `kubectl` (included with Azure CLI or standalone)
+- `helm` (`brew install helm` on macOS)
+- `gh` CLI for GitHub operations
 
-**MongoDB and API Keys**:
+**External services** (existing):
 
-- MongoDB Atlas connection string (or other MongoDB instance reachable from AKS)
-- Azure Document Intelligence endpoint and API key
-- Azure OpenAI endpoint and API key
+- MongoDB Atlas (or other MongoDB instance) — connection string, user, password
+- Azure Document Intelligence — endpoint and API key
+- Azure OpenAI — endpoint and API key
 
-**Microsoft Entra ID**:
+### 5.2 Create Azure Resources
 
-- An app registration in Entra ID with redirect URI set to your application's URL
-- The client ID and tenant ID
+Resource naming convention: `{type}-{project}` (e.g., `rg-mydocs`, `aks-mydocs`). ACR names must be alphanumeric only (e.g., `acrmydocs`).
 
-### 5.2 GitHub Configuration
+```bash
+# Set variables
+RG=rg-mydocs
+LOCATION=westeurope    # or your preferred region
+AKS_NAME=aks-mydocs
+ACR_NAME=acrmydocs     # must be globally unique, alphanumeric only
+```
+
+**1. Register resource providers** (first-time only per subscription):
+
+```bash
+az provider register --namespace Microsoft.ContainerRegistry
+az provider register --namespace Microsoft.ContainerService
+# Wait for registration (can take 1-2 minutes)
+az provider show -n Microsoft.ContainerRegistry --query registrationState -o tsv
+az provider show -n Microsoft.ContainerService --query registrationState -o tsv
+```
+
+**2. Create resource group and ACR:**
+
+```bash
+az group create --name $RG --location $LOCATION
+az acr create --name $ACR_NAME --resource-group $RG --sku Basic --location $LOCATION
+```
+
+**3. Create AKS cluster:**
+
+```bash
+# Note: Standard_B2s may not be available in all subscriptions.
+# Use standard_b2s_v2 (2 vCPU, 8GB RAM) as a budget alternative.
+az aks create \
+  --name $AKS_NAME \
+  --resource-group $RG \
+  --location $LOCATION \
+  --node-count 1 \
+  --node-vm-size standard_b2s_v2 \
+  --enable-managed-identity \
+  --generate-ssh-keys
+
+# Attach ACR to AKS (grants pull access)
+az aks update --name $AKS_NAME --resource-group $RG --attach-acr $ACR_NAME
+```
+
+**4. Get kubectl credentials and install NGINX ingress:**
+
+```bash
+az aks get-credentials --resource-group $RG --name $AKS_NAME
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --create-namespace --namespace ingress-nginx \
+  --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz
+```
+
+**5. Get the ingress external IP** (wait 1-2 minutes after install):
+
+```bash
+kubectl get service --namespace ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+```
+
+Save this IP — you'll need it for the ingress hostname and OAuth redirect URI.
+
+**6. Update the ingress hostname:**
+
+Edit `deploy/k8s/base/ingress.yml` and replace the host with your domain or `{IP}.nip.io` for quick testing:
+
+```yaml
+rules:
+  - host: <INGRESS_IP>.nip.io   # e.g., 20.103.70.81.nip.io
+```
+
+### 5.3 Set Up GitHub OIDC (CI/CD Authentication)
+
+The CI/CD pipeline uses OIDC federated credentials — no stored passwords.
+
+```bash
+# Create app registration for GitHub Actions
+APP_ID=$(az ad app create --display-name sp-mydocs-github --query appId -o tsv)
+SP_ID=$(az ad sp create --id $APP_ID --query id -o tsv)
+
+# Assign roles
+ACR_ID=$(az acr show --name $ACR_NAME --query id -o tsv)
+AKS_ID=$(az aks show --name $AKS_NAME --resource-group $RG --query id -o tsv)
+az role assignment create --assignee $SP_ID --role AcrPush --scope $ACR_ID
+az role assignment create --assignee $SP_ID --role "Azure Kubernetes Service Cluster User Role" --scope $AKS_ID
+
+# Create federated credential for the azure-deployment branch
+# Replace OWNER/REPO with your GitHub repo
+az ad app federated-credential create --id $APP_ID --parameters '{
+  "name": "github-azure-deployment",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:OWNER/REPO:ref:refs/heads/azure-deployment",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+
+# Note these values for GitHub secrets:
+TENANT_ID=$(az account show --query tenantId -o tsv)
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+echo "AZURE_CLIENT_ID: $APP_ID"
+echo "AZURE_TENANT_ID: $TENANT_ID"
+echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
+```
+
+### 5.4 Set Up Microsoft Entra ID (OAuth)
+
+**1. Create the app registration:**
+
+```bash
+ENTRA_APP_ID=$(az ad app create \
+  --display-name "MyDocs App" \
+  --sign-in-audience AzureADMyOrg \
+  --query appId -o tsv)
+ENTRA_OBJECT_ID=$(az ad app show --id $ENTRA_APP_ID --query id -o tsv)
+```
+
+**2. Configure the Application ID URI and API scope:**
+
+The MSAL SPA requests `api://{clientId}/access_as_user` — this scope must exist:
+
+```bash
+# Set Application ID URI
+az ad app update --id $ENTRA_APP_ID \
+  --identifier-uris "api://$ENTRA_APP_ID"
+
+# Add the access_as_user scope
+SCOPE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+az ad app update --id $ENTRA_APP_ID \
+  --set "api={\"oauth2PermissionScopes\":[{
+    \"adminConsentDescription\":\"Access MyDocs as a user\",
+    \"adminConsentDisplayName\":\"Access as user\",
+    \"id\":\"$SCOPE_ID\",
+    \"isEnabled\":true,
+    \"type\":\"User\",
+    \"userConsentDescription\":\"Access MyDocs on your behalf\",
+    \"userConsentDisplayName\":\"Access as user\",
+    \"value\":\"access_as_user\"
+  }]}"
+```
+
+**3. Set access token version to v2:**
+
+By default, Entra issues v1 tokens (issuer: `sts.windows.net`). The backend accepts both v1 and v2 issuers, but v2 is preferred:
+
+```bash
+az rest --method PATCH \
+  --uri "https://graph.microsoft.com/v1.0/applications/$ENTRA_OBJECT_ID" \
+  --headers "Content-Type=application/json" \
+  --body '{"api":{"requestedAccessTokenVersion":2}}'
+```
+
+**4. Add SPA redirect URI:**
+
+MSAL requires HTTPS for SPA redirect URIs (except localhost). For quick testing without a domain, use a self-signed certificate with nip.io:
+
+```bash
+# Add SPA platform redirect URI
+az ad app update --id $ENTRA_APP_ID \
+  --set spa="{\"redirectUris\":[\"https://<INGRESS_IP>.nip.io/\"]}"
+```
+
+**5. Create the service principal and restrict access:**
+
+```bash
+SP_OBJ_ID=$(az ad sp create --id $ENTRA_APP_ID --query id -o tsv)
+
+# Enable "User assignment required" (only assigned users can log in)
+az rest --method PATCH \
+  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_OBJ_ID" \
+  --headers "Content-Type=application/json" \
+  --body '{"appRoleAssignmentRequired": true}'
+```
+
+**6. Invite and assign users:**
+
+For external users (personal Microsoft accounts like `user@outlook.com`):
+
+```bash
+# Invite as guest
+USER_ID=$(az rest --method POST \
+  --uri "https://graph.microsoft.com/v1.0/invitations" \
+  --headers "Content-Type=application/json" \
+  --body '{
+    "invitedUserEmailAddress": "user@outlook.com",
+    "inviteRedirectUrl": "https://<INGRESS_IP>.nip.io/",
+    "sendInvitationMessage": true
+  }' --query invitedUser.id -o tsv)
+
+# Assign user to the app (default role)
+az rest --method POST \
+  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_OBJ_ID/appRoleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body "{
+    \"principalId\": \"$USER_ID\",
+    \"resourceId\": \"$SP_OBJ_ID\",
+    \"appRoleId\": \"00000000-0000-0000-0000-000000000000\"
+  }"
+```
+
+The invited user must accept the email invitation before they can sign in.
+
+For tenant-internal users, skip the invitation step and use their Object ID directly.
+
+### 5.5 TLS / HTTPS
+
+MSAL SPA requires HTTPS. Choose one approach:
+
+**Option A: Self-signed certificate** (quick testing):
+
+```bash
+INGRESS_IP=<your-ingress-ip>
+
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /tmp/mydocs-tls.key -out /tmp/mydocs-tls.crt \
+  -subj "/CN=$INGRESS_IP.nip.io" \
+  -addext "subjectAltName=DNS:$INGRESS_IP.nip.io"
+
+kubectl create secret tls mydocs-tls \
+  --cert=/tmp/mydocs-tls.crt --key=/tmp/mydocs-tls.key \
+  --namespace=mydocs --dry-run=client -o yaml | kubectl apply -f -
+
+# Update the ingress to use TLS (apply inline or edit ingress.yml)
+kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mydocs-ingress
+  namespace: mydocs
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["$INGRESS_IP.nip.io"]
+      secretName: mydocs-tls
+  rules:
+    - host: $INGRESS_IP.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: ui, port: { number: 80 } }
+EOF
+```
+
+Users will see a browser certificate warning (click through to proceed).
+
+**Option B: cert-manager with Let's Encrypt** (production — requires a real domain):
+
+The Azure overlay (`deploy/k8s/overlays/azure/ingress-patch.yml`) adds TLS via cert-manager:
+
+1. Install cert-manager: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml`
+2. Create a `ClusterIssuer` named `letsencrypt-prod`
+3. Point a DNS A record to the ingress controller's external IP
+4. Re-enable the TLS patch in `deploy/k8s/overlays/azure/kustomization.yaml`
+
+### 5.6 GitHub Configuration
 
 #### Secrets (Settings → Secrets and variables → Actions → Secrets)
 
 | Secret | Description | Example |
 |--------|-------------|---------|
-| `AZURE_CLIENT_ID` | Service principal client ID for OIDC login | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `AZURE_TENANT_ID` | Azure AD tenant ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `ENTRA_CLIENT_ID` | Entra ID app registration client ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `ENTRA_AUTHORITY` | Entra ID authority URL | `https://login.microsoftonline.com/<tenant-id>` |
+| `AZURE_CLIENT_ID` | Service principal client ID (from §5.3) | `xxxxxxxx-xxxx-...` |
+| `AZURE_TENANT_ID` | Azure AD tenant ID | `xxxxxxxx-xxxx-...` |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `xxxxxxxx-xxxx-...` |
+| `ENTRA_CLIENT_ID` | OAuth app client ID (from §5.4) | `xxxxxxxx-xxxx-...` |
+| `ENTRA_TENANT_ID` | Same as `AZURE_TENANT_ID` | `xxxxxxxx-xxxx-...` |
+| `ENTRA_AUTHORITY` | Entra authority URL | `https://login.microsoftonline.com/<tenant-id>` |
 | `MONGO_URL` | MongoDB connection string | `mongodb+srv://cluster.mongodb.net` |
 | `MONGO_USER` | MongoDB username | `mydocs_user` |
 | `MONGO_PASSWORD` | MongoDB password | `***` |
@@ -498,16 +753,30 @@ kubectl apply -k .
 | `AZURE_DI_API_KEY` | Document Intelligence API key | `***` |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key | `***` |
 | `AZURE_OPENAI_API_BASE` | Azure OpenAI endpoint | `https://myoai.openai.azure.com` |
+| `MYDOCS_STORAGE_BACKEND` | `azure_blob` or `local` | `azure_blob` |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Storage account name | `mydocsstoracc001` |
+| `AZURE_STORAGE_ACCOUNT_KEY` | Storage account key (if not using managed identity) | `***` |
+| `AZURE_STORAGE_CONTAINER_NAME` | Blob container name | `docs` |
+
+You can set these via `gh` CLI:
+
+```bash
+gh secret set SECRET_NAME --body "value" --repo OWNER/REPO
+```
 
 #### Variables (Settings → Secrets and variables → Actions → Variables)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `ACR_NAME` | Azure Container Registry name (without `.azurecr.io`) | `mydocsacr` |
-| `AKS_CLUSTER_NAME` | AKS cluster name | `mydocs-aks` |
-| `AKS_RESOURCE_GROUP` | Resource group containing the AKS cluster | `mydocs-rg` |
+| `ACR_NAME` | ACR name (without `.azurecr.io`) | `acrmydocs` |
+| `AKS_CLUSTER_NAME` | AKS cluster name | `aks-mydocs` |
+| `AKS_RESOURCE_GROUP` | Resource group | `rg-mydocs` |
 
-### 5.3 Trigger a Deployment
+```bash
+gh variable set VAR_NAME --body "value" --repo OWNER/REPO
+```
+
+### 5.7 Trigger a Deployment
 
 **Option A: Push to the deployment branch**
 
@@ -532,7 +801,7 @@ Go to Actions → "Deploy to Azure AKS" → Run workflow. Optionally provide a c
 
 Opening a PR targeting `azure-deployment` will run the build job only (no deploy), validating that images build successfully.
 
-### 5.4 Pipeline Flow
+### 5.8 Pipeline Flow
 
 ```
 push to azure-deployment
@@ -566,11 +835,11 @@ push to azure-deployment
 └───────────────────────────────┘
 ```
 
-### 5.5 Post-Deployment Verification
+### 5.9 Post-Deployment Verification
 
 ```bash
 # Get AKS credentials locally
-az aks get-credentials --resource-group mydocs-rg --name mydocs-aks
+az aks get-credentials --resource-group rg-mydocs --name aks-mydocs
 
 # Check pods
 kubectl get pods -n mydocs
@@ -582,25 +851,24 @@ kubectl get ingress -n mydocs
 kubectl logs -n mydocs deployment/backend
 kubectl logs -n mydocs deployment/ui
 
-# Check backend health
+# Check backend health via port-forward
 kubectl port-forward -n mydocs svc/backend 8000:8000
 curl http://localhost:8000/health
 ```
 
-### 5.6 TLS / HTTPS
+### 5.10 Troubleshooting
 
-The Azure overlay patches the base ingress to add TLS via cert-manager:
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Backend `CrashLoopBackOff` with MongoDB SSL error | AKS outbound IP not in MongoDB Atlas allowlist | Get IP: `az aks show --name aks-mydocs --resource-group rg-mydocs --query "networkProfile.loadBalancerProfile.effectiveOutboundIPs[].id" -o tsv \| xargs -I{} az network public-ip show --ids {} --query ipAddress -o tsv`. Add it to Atlas Network Access. |
+| Login succeeds but immediate sign-out (401 loop) | JWT audience mismatch — token has `aud=api://{clientId}` but backend expects `{clientId}` | Backend already accepts both formats. Ensure the Application ID URI (`api://{clientId}`) and `access_as_user` scope are configured on the app registration. |
+| Login succeeds but immediate sign-out (issuer mismatch) | Entra issues v1 tokens with `iss=https://sts.windows.net/{tenant}/` | Backend accepts both v1 and v2 issuers. Optionally set `accessTokenAcceptedVersion: 2` on the app to get v2 tokens. |
+| Blank page on HTTP | MSAL SPA requires HTTPS for redirect URIs (except localhost) | Set up TLS (self-signed or cert-manager). See §5.5. |
+| Upload fails with `ClientAuthenticationError` on Blob Storage | Pod can't authenticate with Azure Blob Storage | Add `AZURE_STORAGE_ACCOUNT_KEY` as a GitHub Secret, or configure workload identity with `Storage Blob Data Contributor` role. |
+| `Standard_B2s` not available | VM size restricted in subscription | Use `standard_b2s_v2` or check available sizes: `az vm list-skus --location westeurope --size Standard_B --output table` |
+| Resource provider not registered | First use of ACR/AKS in subscription | Run `az provider register --namespace Microsoft.ContainerRegistry` (and `Microsoft.ContainerService`). Wait 1-2 minutes. |
 
-- Annotation: `cert-manager.io/cluster-issuer: letsencrypt-prod`
-- TLS secret: `mydocs-tls`
-- Host: `mydocs.example.com` (update in `deploy/k8s/base/ingress.yml`)
-
-**Prerequisites for TLS**:
-1. cert-manager installed in the cluster: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml`
-2. A `ClusterIssuer` named `letsencrypt-prod` configured
-3. A DNS A record pointing your domain to the ingress controller's external IP
-
-### 5.7 Rollback
+### 5.11 Rollback
 
 ```bash
 # View deployment history
@@ -673,9 +941,12 @@ When using `azure_blob` backend with AKS CI/CD, add these GitHub Secrets:
 |--------|-------|-------|
 | `MYDOCS_STORAGE_BACKEND` | `azure_blob` | Enables Blob backend |
 | `AZURE_STORAGE_ACCOUNT_NAME` | Your storage account name | Required |
+| `AZURE_STORAGE_ACCOUNT_KEY` | Storage account key | Required unless using workload identity |
 | `AZURE_STORAGE_CONTAINER_NAME` | `managed` (or custom) | Container for managed files |
 
-Authentication: The AKS pod's workload identity authenticates via `DefaultAzureCredential`. Ensure the pod identity has `Storage Blob Data Contributor` role on the storage account. Alternatively, set `AZURE_STORAGE_ACCOUNT_KEY` as a GitHub Secret for key-based auth.
+**Authentication options** (choose one):
+- **Account key** (simplest): Set `AZURE_STORAGE_ACCOUNT_KEY` as a GitHub Secret. The CI/CD pipeline injects it into the K8s secret.
+- **Workload identity** (more secure, no stored keys): Configure AKS workload identity and assign the pod identity the `Storage Blob Data Contributor` role on the storage account. Omit `AZURE_STORAGE_ACCOUNT_KEY` — the SDK uses `DefaultAzureCredential` automatically.
 
 ---
 
