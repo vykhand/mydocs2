@@ -1,0 +1,1607 @@
+openapi: 3.0.3
+info:
+  title: mydocs
+  description: AI-powered document parsing and information extraction
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: health
+    description: Health check
+  - name: documents
+    description: Document CRUD, ingestion, parsing, and tagging
+  - name: search
+    description: Full-text and vector search
+  - name: cases
+    description: Case management and document grouping
+  - name: extraction
+    description: LLM-based field extraction and split-classify
+  - name: sync
+    description: Storage-to-database synchronization and migration
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Health
+  # ---------------------------------------------------------------------------
+  /health:
+    get:
+      operationId: health
+      tags: [health]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ---------------------------------------------------------------------------
+  # Documents
+  # ---------------------------------------------------------------------------
+  /api/v1/documents:
+    get:
+      operationId: listDocuments
+      tags: [documents]
+      summary: List documents with filtering and pagination
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 25, minimum: 1, maximum: 100 }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/DocumentStatusEnum" }
+        - name: file_type
+          in: query
+          schema: { $ref: "#/components/schemas/FileTypeEnum" }
+        - name: document_type
+          in: query
+          schema: { $ref: "#/components/schemas/DocumentTypeEnum" }
+        - name: tags
+          in: query
+          description: Comma-separated tags
+          schema: { type: string }
+        - name: sort_by
+          in: query
+          schema: { type: string, default: created_at }
+        - name: sort_order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: search
+          in: query
+          description: Substring match on original_file_name
+          schema: { type: string }
+        - name: date_from
+          in: query
+          description: ISO date string (inclusive)
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          description: ISO date string (inclusive)
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Paginated document list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponse"
+
+  /api/v1/documents/upload:
+    post:
+      operationId: uploadFiles
+      tags: [documents]
+      summary: Upload files via multipart form
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                tags:
+                  type: string
+                  description: Comma-separated tags
+                  default: ""
+                parse_after_upload:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Ingestion result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+
+  /api/v1/documents/ingest:
+    post:
+      operationId: ingestDocuments
+      tags: [documents]
+      summary: Ingest documents from file paths
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestRequest"
+      responses:
+        "200":
+          description: Ingestion result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+
+  /api/v1/documents/parse:
+    post:
+      operationId: parseBatch
+      tags: [documents]
+      summary: Batch-parse documents by IDs, tags, or status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchParseRequest"
+      responses:
+        "200":
+          description: Batch parse result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchParseResponse"
+
+  /api/v1/documents/{document_id}:
+    get:
+      operationId: getDocument
+      tags: [documents]
+      summary: Get a single document by ID
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+      responses:
+        "200":
+          description: Document object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteDocument
+      tags: [documents]
+      summary: Delete a document and its pages, managed files, and sidecars
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+      responses:
+        "204":
+          description: Document deleted
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/documents/{document_id}/parse:
+    post:
+      operationId: parseSingle
+      tags: [documents]
+      summary: Parse a single document
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParseRequest"
+      responses:
+        "200":
+          description: Parse result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResponse"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Document is locked (currently being parsed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/documents/{document_id}/file:
+    get:
+      operationId: getDocumentFile
+      tags: [documents]
+      summary: Download the original file (local) or redirect to SAS URL (Azure Blob)
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+      responses:
+        "200":
+          description: File content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "307":
+          description: Redirect to Azure Blob SAS URL
+        "404":
+          description: Document or file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/documents/{document_id}/pages:
+    get:
+      operationId: getPages
+      tags: [documents]
+      summary: List all pages for a document
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+      responses:
+        "200":
+          description: Array of document pages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocumentPage"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/documents/{document_id}/pages/{page_number}:
+    get:
+      operationId: getPage
+      tags: [documents]
+      summary: Get a single page by number
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+        - name: page_number
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Document page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentPage"
+        "404":
+          description: Page not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/documents/{document_id}/tags:
+    post:
+      operationId: addTags
+      tags: [documents]
+      summary: Add tags to a document
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TagsRequest"
+      responses:
+        "200":
+          description: Updated document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/documents/{document_id}/tags/{tag}:
+    delete:
+      operationId: removeTag
+      tags: [documents]
+      summary: Remove a tag from a document
+      parameters:
+        - $ref: "#/components/parameters/documentId"
+        - name: tag
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Search
+  # ---------------------------------------------------------------------------
+  /api/v1/search:
+    post:
+      operationId: searchDocuments
+      tags: [search]
+      summary: Search documents and pages via full-text, vector, or hybrid search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/search/indices:
+    get:
+      operationId: listIndices
+      tags: [search]
+      summary: List available vector search indices
+      responses:
+        "200":
+          description: Index information grouped by search target
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IndexInfo"
+                  documents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IndexInfo"
+
+  # ---------------------------------------------------------------------------
+  # Cases
+  # ---------------------------------------------------------------------------
+  /api/v1/cases:
+    get:
+      operationId: listCases
+      tags: [cases]
+      summary: List cases with pagination and search
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 25, minimum: 1, maximum: 100 }
+        - name: search
+          in: query
+          description: Substring match on case name
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated case list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseListResponse"
+    post:
+      operationId: createCase
+      tags: [cases]
+      summary: Create a new case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaseCreateRequest"
+      responses:
+        "200":
+          description: Created case
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+
+  /api/v1/cases/{case_id}:
+    get:
+      operationId: getCase
+      tags: [cases]
+      summary: Get a single case by ID
+      parameters:
+        - $ref: "#/components/parameters/caseId"
+      responses:
+        "200":
+          description: Case object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "404":
+          description: Case not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateCase
+      tags: [cases]
+      summary: Update a case
+      parameters:
+        - $ref: "#/components/parameters/caseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaseUpdateRequest"
+      responses:
+        "200":
+          description: Updated case
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "404":
+          description: Case not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteCase
+      tags: [cases]
+      summary: Delete a case
+      parameters:
+        - $ref: "#/components/parameters/caseId"
+      responses:
+        "204":
+          description: Case deleted
+        "404":
+          description: Case not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/cases/{case_id}/documents:
+    get:
+      operationId: listCaseDocuments
+      tags: [cases]
+      summary: List documents in a case
+      parameters:
+        - $ref: "#/components/parameters/caseId"
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 25, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Paginated document list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponse"
+        "404":
+          description: Case not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: addDocumentsToCase
+      tags: [cases]
+      summary: Add documents to a case
+      parameters:
+        - $ref: "#/components/parameters/caseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaseDocumentsRequest"
+      responses:
+        "200":
+          description: Updated case
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "404":
+          description: Case not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/cases/{case_id}/documents/{document_id}:
+    delete:
+      operationId: removeDocumentFromCase
+      tags: [cases]
+      summary: Remove a document from a case
+      parameters:
+        - $ref: "#/components/parameters/caseId"
+        - $ref: "#/components/parameters/documentId"
+      responses:
+        "200":
+          description: Updated case
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "404":
+          description: Case not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Extraction
+  # ---------------------------------------------------------------------------
+  /api/v1/extract:
+    post:
+      operationId: extractFields
+      tags: [extraction]
+      summary: Extract fields from documents using LLM-based extraction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExtractionRequest"
+      responses:
+        "200":
+          description: Extraction results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractionResponse"
+        "500":
+          description: Extraction failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/field-results:
+    get:
+      operationId: getFieldResults
+      tags: [extraction]
+      summary: Get stored extraction results for a document
+      parameters:
+        - name: document_id
+          in: query
+          required: true
+          description: Document ID to fetch results for
+          schema: { type: string }
+      responses:
+        "200":
+          description: Array of field result records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FieldResultRecord"
+        "500":
+          description: Fetch failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/split-classify:
+    post:
+      operationId: splitClassify
+      tags: [extraction]
+      summary: Split and classify a multi-document file into typed segments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SplitClassifyRequest"
+      responses:
+        "200":
+          description: Split-classify result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SplitClassifyResult"
+        "400":
+          description: Invalid request (e.g. not exactly one document_id)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Split-classify failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Sync
+  # ---------------------------------------------------------------------------
+  /api/v1/sync/plan:
+    post:
+      operationId: createSyncPlan
+      tags: [sync]
+      summary: Build a sync plan by scanning storage and comparing with DB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncPlanRequest"
+      responses:
+        "200":
+          description: Sync plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncPlan"
+        "500":
+          description: Plan build failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sync/execute:
+    post:
+      operationId: executeSyncPlan
+      tags: [sync]
+      summary: Execute a sync plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncExecuteRequest"
+      responses:
+        "200":
+          description: Sync report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncReport"
+        "500":
+          description: Sync execution failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sync/write-sidecars:
+    post:
+      operationId: writeSidecars
+      tags: [sync]
+      summary: Write missing sidecars for managed files that have DB records
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WriteSidecarsRequest"
+      responses:
+        "200":
+          description: Write sidecars result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  written:
+                    type: integer
+                  skipped:
+                    type: integer
+        "500":
+          description: Write sidecars failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sync/migrate/plan:
+    post:
+      operationId: createMigratePlan
+      tags: [sync]
+      summary: Build a migration plan for cross-backend document migration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MigratePlanRequest"
+      responses:
+        "200":
+          description: Migration plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MigratePlan"
+        "400":
+          description: Invalid backend value or same source/target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Plan build failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sync/migrate/execute:
+    post:
+      operationId: executeMigration
+      tags: [sync]
+      summary: Execute a cross-backend migration (storage-only, no DB writes)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MigrateExecuteRequest"
+      responses:
+        "200":
+          description: Migration report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MigrateReport"
+        "400":
+          description: Invalid backend value or same source/target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Migration execution failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Microsoft Entra ID (Azure AD) JWT token
+
+  parameters:
+    documentId:
+      name: document_id
+      in: path
+      required: true
+      schema: { type: string }
+    caseId:
+      name: case_id
+      in: path
+      required: true
+      schema: { type: string }
+
+  schemas:
+    # -------------------------------------------------------------------------
+    # Enumerations
+    # -------------------------------------------------------------------------
+    FileTypeEnum:
+      type: string
+      enum: [unknown, pdf, txt, docx, xlsx, pptx, jpeg, png, bmp, tiff]
+
+    StorageModeEnum:
+      type: string
+      enum: [managed, external]
+
+    StorageBackendEnum:
+      type: string
+      enum: [local, azure_blob, s3, gcs, onedrive]
+
+    DocumentStatusEnum:
+      type: string
+      enum: [new, parsing, parsed, failed, skipped, not_supported]
+
+    DocumentElementTypeEnum:
+      type: string
+      enum: [paragraph, table, key_value_pair, image, barcode]
+
+    DocumentTypeEnum:
+      type: string
+      enum: [generic]
+
+    ExtractionMode:
+      type: string
+      enum: [referenced, direct]
+
+    ReferenceGranularity:
+      type: string
+      enum: [full, page, none]
+
+    ContentMode:
+      type: string
+      enum: [markdown, html]
+
+    FieldDataType:
+      type: string
+      enum: [string, date, number, currency, boolean, enum, text]
+
+    SyncActionEnum:
+      type: string
+      enum: [restore, reparse, orphaned_db, verified, sidecar_missing]
+
+    MigrateActionEnum:
+      type: string
+      enum: [copy, copy_sidecar, skip_target, skip_no_path]
+
+    # -------------------------------------------------------------------------
+    # Core Models
+    # -------------------------------------------------------------------------
+    DocumentElement:
+      type: object
+      required: [id, page_id, page_number, offset, type, element_data]
+      properties:
+        id: { type: string, description: "Globally unique element ID (deterministic hash)" }
+        page_id: { type: string, description: "Reference to the page containing this element" }
+        page_number: { type: integer, description: "1-based page number" }
+        offset: { type: integer, description: "Character offset in the original content" }
+        short_id: { type: string, nullable: true, description: "Short element reference ID (e.g., p0, t1, kv2)" }
+        type: { $ref: "#/components/schemas/DocumentElementTypeEnum" }
+        element_data: { type: object }
+
+    SubDocumentPageRef:
+      type: object
+      required: [document_id, page_id, page_number]
+      properties:
+        document_id: { type: string }
+        page_id: { type: string }
+        page_number: { type: integer }
+
+    SubDocument:
+      type: object
+      required: [id, case_type, document_type, page_refs]
+      properties:
+        id: { type: string }
+        case_type: { type: string }
+        document_type: { type: string }
+        page_refs:
+          type: array
+          items: { $ref: "#/components/schemas/SubDocumentPageRef" }
+        created_at: { type: string, format: date-time, nullable: true }
+
+    Document:
+      type: object
+      required: [id, content_hash, file_name, original_file_name, file_type, original_path, storage_mode, storage_backend]
+      properties:
+        id: { type: string }
+        content_hash: { type: string }
+        file_name: { type: string }
+        original_file_name: { type: string }
+        file_type: { $ref: "#/components/schemas/FileTypeEnum" }
+        original_path: { type: string }
+        storage_mode: { $ref: "#/components/schemas/StorageModeEnum" }
+        storage_backend: { $ref: "#/components/schemas/StorageBackendEnum" }
+        managed_path: { type: string, nullable: true }
+        file_metadata:
+          type: object
+          nullable: true
+          description: File-level metadata (see FileMetadata schema)
+          properties:
+            size_bytes: { type: integer, nullable: true }
+            mime_type: { type: string, nullable: true }
+            created_at: { type: string, format: date-time, nullable: true }
+            modified_at: { type: string, format: date-time, nullable: true }
+            crc32: { type: string, nullable: true }
+            sha256: { type: string, nullable: true }
+            page_count: { type: integer, nullable: true }
+            author: { type: string, nullable: true }
+            title: { type: string, nullable: true }
+            subject: { type: string, nullable: true }
+            image_width: { type: integer, nullable: true }
+            image_height: { type: integer, nullable: true }
+        status: { $ref: "#/components/schemas/DocumentStatusEnum" }
+        document_type: { $ref: "#/components/schemas/DocumentTypeEnum" }
+        locked: { type: boolean, default: false }
+        content: { type: string, nullable: true }
+        content_type: { type: string, nullable: true }
+        parser_engine: { type: string, nullable: true }
+        parser_config_hash: { type: string, nullable: true }
+        elements:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/DocumentElement" }
+        subdocuments:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/SubDocument" }
+        tags:
+          type: array
+          items: { type: string }
+          default: []
+        created_at: { type: string, format: date-time, nullable: true }
+        modified_at: { type: string, format: date-time, nullable: true }
+
+    DocumentPage:
+      type: object
+      required: [id, document_id, page_number]
+      properties:
+        id: { type: string }
+        document_id: { type: string }
+        page_number: { type: integer }
+        content: { type: string, nullable: true }
+        content_markdown: { type: string, nullable: true }
+        content_html: { type: string, nullable: true }
+        height: { type: number, nullable: true }
+        width: { type: number, nullable: true }
+        unit: { type: string, nullable: true }
+
+    Case:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, default: generic }
+        description: { type: string, nullable: true }
+        document_ids:
+          type: array
+          items: { type: string }
+          default: []
+        created_at: { type: string, format: date-time, nullable: true }
+        modified_at: { type: string, format: date-time, nullable: true }
+
+    # -------------------------------------------------------------------------
+    # Document Request / Response Models
+    # -------------------------------------------------------------------------
+    IngestRequest:
+      type: object
+      required: [source]
+      properties:
+        source:
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: string }
+        storage_mode:
+          $ref: "#/components/schemas/StorageModeEnum"
+          default: managed
+        storage_backend:
+          type: string
+          nullable: true
+          enum: [local, azure_blob, s3, gcs, onedrive]
+        tags:
+          type: array
+          items: { type: string }
+          default: []
+        recursive:
+          type: boolean
+          default: true
+
+    IngestResponse:
+      type: object
+      required: [documents, skipped]
+      properties:
+        documents:
+          type: array
+          items: { type: object }
+        skipped:
+          type: array
+          items: { type: object }
+
+    ParseRequest:
+      type: object
+      properties:
+        parser_config_override:
+          type: object
+          nullable: true
+
+    ParseResponse:
+      type: object
+      required: [document_id, status, page_count, element_count]
+      properties:
+        document_id: { type: string }
+        status: { type: string }
+        page_count: { type: integer }
+        element_count: { type: integer }
+
+    BatchParseRequest:
+      type: object
+      properties:
+        document_ids:
+          type: array
+          nullable: true
+          items: { type: string }
+        tags:
+          type: array
+          nullable: true
+          items: { type: string }
+        status_filter:
+          type: string
+          nullable: true
+
+    BatchParseResponse:
+      type: object
+      required: [queued, skipped]
+      properties:
+        queued: { type: integer }
+        skipped: { type: integer }
+
+    TagsRequest:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items: { type: string }
+
+    DocumentListResponse:
+      type: object
+      required: [documents, total, page, page_size]
+      properties:
+        documents:
+          type: array
+          items: { type: object }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+
+    # -------------------------------------------------------------------------
+    # Case Request / Response Models
+    # -------------------------------------------------------------------------
+    CaseCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+
+    CaseUpdateRequest:
+      type: object
+      properties:
+        name: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+
+    CaseDocumentsRequest:
+      type: object
+      required: [document_ids]
+      properties:
+        document_ids:
+          type: array
+          items: { type: string }
+
+    CaseListResponse:
+      type: object
+      required: [cases, total, page, page_size]
+      properties:
+        cases:
+          type: array
+          items: { type: object }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+
+    # -------------------------------------------------------------------------
+    # Search Models
+    # -------------------------------------------------------------------------
+    FuzzyConfig:
+      type: object
+      properties:
+        enabled: { type: boolean, default: false }
+        max_edits: { type: integer, default: 2 }
+        prefix_length: { type: integer, default: 3 }
+
+    FullTextSearchConfig:
+      type: object
+      properties:
+        enabled: { type: boolean, default: true }
+        content_field: { type: string, default: content }
+        fuzzy:
+          $ref: "#/components/schemas/FuzzyConfig"
+        score_boost: { type: number, default: 1.0 }
+
+    VectorSearchConfig:
+      type: object
+      properties:
+        enabled: { type: boolean, default: true }
+        index_name: { type: string, nullable: true }
+        embedding_model: { type: string, nullable: true }
+        num_candidates: { type: integer, default: 100 }
+        score_boost: { type: number, default: 1.0 }
+
+    HybridSearchConfig:
+      type: object
+      properties:
+        combination_method:
+          type: string
+          enum: [rrf, weighted_sum]
+          default: rrf
+        rrf_k: { type: integer, default: 60 }
+        weights:
+          type: object
+          properties:
+            fulltext: { type: number }
+            vector: { type: number }
+          default: { fulltext: 0.5, vector: 0.5 }
+
+    SearchFilters:
+      type: object
+      properties:
+        tags:
+          type: array
+          nullable: true
+          items: { type: string }
+        file_type: { type: string, nullable: true }
+        document_ids:
+          type: array
+          nullable: true
+          items: { type: string }
+        status: { type: string, nullable: true }
+        document_type: { type: string, nullable: true }
+
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string }
+        search_target:
+          type: string
+          enum: [pages, documents]
+          default: pages
+        search_mode:
+          type: string
+          enum: [fulltext, vector, hybrid]
+          default: hybrid
+        fulltext:
+          $ref: "#/components/schemas/FullTextSearchConfig"
+        vector:
+          $ref: "#/components/schemas/VectorSearchConfig"
+        hybrid:
+          $ref: "#/components/schemas/HybridSearchConfig"
+        filters:
+          $ref: "#/components/schemas/SearchFilters"
+        top_k: { type: integer, default: 10 }
+        min_score: { type: number, default: 0.0 }
+        include_content_fields:
+          type: array
+          items: { type: string }
+          default: [content]
+
+    SearchResult:
+      type: object
+      required: [id, document_id, score, scores]
+      properties:
+        id: { type: string }
+        document_id: { type: string }
+        page_number: { type: integer, nullable: true }
+        score: { type: number }
+        scores:
+          type: object
+          properties:
+            fulltext: { type: number }
+            vector: { type: number }
+        content: { type: string, nullable: true }
+        content_markdown: { type: string, nullable: true }
+        file_name: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+          default: []
+
+    SearchResponse:
+      type: object
+      required: [results, total, search_target, search_mode]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/SearchResult" }
+        total: { type: integer }
+        search_target: { type: string }
+        search_mode: { type: string }
+        vector_index_used: { type: string, nullable: true }
+        embedding_model_used: { type: string, nullable: true }
+
+    IndexInfo:
+      type: object
+      properties:
+        index_name: { type: string }
+        embedding_model: { type: string }
+        field: { type: string }
+        dimensions: { type: integer }
+        similarity: { type: string }
+
+    # -------------------------------------------------------------------------
+    # Extraction Models
+    # -------------------------------------------------------------------------
+    FieldValueOption:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        prompt: { type: string, nullable: true }
+
+    FieldDefinition:
+      type: object
+      required: [name, description]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        data_type:
+          $ref: "#/components/schemas/FieldDataType"
+          default: string
+        prompt: { type: string, nullable: true }
+        value_list:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/FieldValueOption" }
+        group: { type: integer, default: 0 }
+        inputs:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/FieldRequirement" }
+
+    FieldRequirement:
+      type: object
+      required: [field_name]
+      properties:
+        field_name: { type: string }
+        document_type: { type: string, nullable: true }
+
+    Reference:
+      type: object
+      required: [document_id, page_id, page_number, page_width, page_height, page_unit, element_type, element_short_id, polygon]
+      properties:
+        document_id: { type: string }
+        page_id: { type: string }
+        page_number: { type: integer }
+        page_width: { type: number }
+        page_height: { type: number }
+        page_unit: { type: string }
+        element_type: { type: string }
+        element_short_id: { type: string }
+        polygon:
+          type: array
+          items: { type: number }
+        llm_reference: { type: string, nullable: true }
+
+    PageReference:
+      type: object
+      required: [document_id, page_id, page_number]
+      properties:
+        document_id: { type: string }
+        page_id: { type: string }
+        page_number: { type: integer }
+
+    FieldResult:
+      type: object
+      properties:
+        content: { type: string, nullable: true }
+        justification: { type: string, nullable: true }
+        citation: { type: string, nullable: true }
+        references:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Reference" }
+        page_references:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/PageReference" }
+        created_by: { type: string, nullable: true }
+        created_at: { type: string, format: date-time, nullable: true }
+
+    FieldReference:
+      type: object
+      required: [field_path]
+      properties:
+        field_path: { type: string }
+        citation: { type: string, nullable: true }
+        justification: { type: string, nullable: true }
+        references:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Reference" }
+        page_references:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/PageReference" }
+
+    ExtractionRequest:
+      type: object
+      required: [document_type]
+      properties:
+        case_id: { type: string, nullable: true }
+        case_type: { type: string, default: generic }
+        document_type: { type: string }
+        extraction_mode:
+          $ref: "#/components/schemas/ExtractionMode"
+          default: referenced
+        output_schema: { type: string, nullable: true }
+        infer_references: { type: boolean, default: false }
+        document_ids:
+          type: array
+          nullable: true
+          items: { type: string }
+        page_ids:
+          type: array
+          nullable: true
+          items: { type: string }
+        file_ids:
+          type: array
+          nullable: true
+          items: { type: string }
+        fields:
+          type: array
+          nullable: true
+          items: { type: string }
+        field_overrides:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/FieldDefinition" }
+        reference_granularity:
+          $ref: "#/components/schemas/ReferenceGranularity"
+          default: full
+        content_mode:
+          $ref: "#/components/schemas/ContentMode"
+          default: markdown
+        subdocument_id: { type: string, nullable: true }
+
+    ExtractionResponse:
+      type: object
+      required: [document_id, document_type, case_type, extraction_mode, results, model_used, reference_granularity]
+      properties:
+        document_id: { type: string }
+        document_type: { type: string }
+        case_type: { type: string }
+        extraction_mode: { type: string }
+        results: { type: object }
+        reference_annotations:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/FieldReference" }
+        subdocument_id: { type: string, nullable: true }
+        target_object_id: { type: string, nullable: true }
+        model_used: { type: string }
+        reference_granularity: { type: string }
+
+    SplitClassifyRequest:
+      description: Extends ExtractionRequest with a force flag for split-classify operations
+      allOf:
+        - $ref: "#/components/schemas/ExtractionRequest"
+        - type: object
+          properties:
+            force: { type: boolean, default: false }
+
+    SplitSegment:
+      type: object
+      required: [document_type, page_numbers]
+      properties:
+        document_type: { type: string }
+        page_numbers:
+          type: array
+          items: { type: integer }
+
+    SplitClassifyResult:
+      type: object
+      required: [segments, subdocuments]
+      properties:
+        segments:
+          type: array
+          items: { $ref: "#/components/schemas/SplitSegment" }
+        subdocuments:
+          type: array
+          items: { type: object }
+
+    FieldResultRecord:
+      type: object
+      required: [id, document_id, document_type, field_name, result]
+      properties:
+        id: { type: string }
+        document_id: { type: string }
+        document_type: { type: string }
+        subdocument_id: { type: string, default: "" }
+        case_type: { type: string, default: generic }
+        field_name: { type: string }
+        result:
+          $ref: "#/components/schemas/FieldResult"
+
+    # -------------------------------------------------------------------------
+    # Sync Models
+    # -------------------------------------------------------------------------
+    SyncPlanRequest:
+      type: object
+      properties:
+        scan_path: { type: string, nullable: true }
+        verify_content: { type: boolean, default: false }
+
+    SyncExecuteRequest:
+      type: object
+      properties:
+        scan_path: { type: string, nullable: true }
+        verify_content: { type: boolean, default: false }
+        reparse: { type: boolean, default: false }
+        actions:
+          type: array
+          nullable: true
+          items: { type: string }
+
+    WriteSidecarsRequest:
+      type: object
+      properties:
+        scan_path: { type: string, nullable: true }
+
+    MigratePlanRequest:
+      type: object
+      required: [source_backend, target_backend]
+      properties:
+        source_backend: { type: string }
+        target_backend: { type: string }
+
+    MigrateExecuteRequest:
+      type: object
+      required: [source_backend, target_backend]
+      properties:
+        source_backend: { type: string }
+        target_backend: { type: string }
+        delete_source: { type: boolean, default: false }
+
+    SyncItem:
+      type: object
+      required: [doc_id, action, reason]
+      properties:
+        file_path: { type: string, nullable: true }
+        doc_id: { type: string }
+        action: { $ref: "#/components/schemas/SyncActionEnum" }
+        reason: { type: string }
+        sidecar_path: { type: string, nullable: true }
+
+    SyncPlan:
+      type: object
+      required: [items, summary, scan_path, scanned_at]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SyncItem" }
+        summary: { type: object }
+        scan_path: { type: string }
+        scanned_at: { type: string, format: date-time }
+
+    SyncItemResult:
+      type: object
+      required: [item, success]
+      properties:
+        item: { $ref: "#/components/schemas/SyncItem" }
+        success: { type: boolean }
+        error: { type: string, nullable: true }
+
+    SyncReport:
+      type: object
+      required: [items, summary, started_at, completed_at]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SyncItemResult" }
+        summary: { type: object }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+
+    MigrateItem:
+      type: object
+      required: [doc_id, file_name, source_path, storage_mode, action, reason]
+      properties:
+        doc_id: { type: string }
+        file_name: { type: string }
+        source_path: { type: string }
+        storage_mode: { type: string }
+        action: { $ref: "#/components/schemas/MigrateActionEnum" }
+        reason: { type: string }
+
+    MigratePlan:
+      type: object
+      required: [items, summary, source_backend, target_backend, planned_at]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MigrateItem" }
+        summary: { type: object }
+        source_backend: { type: string }
+        target_backend: { type: string }
+        planned_at: { type: string, format: date-time }
+
+    MigrateItemResult:
+      type: object
+      required: [item, success]
+      properties:
+        item: { $ref: "#/components/schemas/MigrateItem" }
+        success: { type: boolean }
+        dest_path: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+
+    MigrateReport:
+      type: object
+      required: [items, summary, source_backend, target_backend, started_at, completed_at]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MigrateItemResult" }
+        summary: { type: object }
+        source_backend: { type: string }
+        target_backend: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        delete_source: { type: boolean, default: false }
+
+    # -------------------------------------------------------------------------
+    # Error
+    # -------------------------------------------------------------------------
+    ErrorResponse:
+      type: object
+      required: [detail, error_code, status_code]
+      properties:
+        detail: { type: string }
+        error_code: { type: string }
+        status_code: { type: integer }
