@@ -1,6 +1,6 @@
 # Infrastructure & Deployment Guide
 
-**Last updated**: 2026-02-23
+**Last updated**: 2026-02-27
 **Spec reference**: [docs/specs/infrastructure.md](docs/specs/infrastructure.md)
 
 ---
@@ -9,9 +9,10 @@
 
 1. [Current State Overview](#1-current-state-overview)
 2. [Deviations from Spec](#2-deviations-from-spec)
-3. [Deployment: Docker Compose (Local)](#3-deployment-docker-compose-local)
-4. [Deployment: Self-Hosted Kubernetes](#4-deployment-self-hosted-kubernetes)
-5. [Deployment: Azure AKS (CI/CD)](#5-deployment-azure-aks-cicd)
+3. [Local Development (No Docker)](#3-local-development-no-docker)
+4. [Deployment: Docker Compose (Local)](#4-deployment-docker-compose-local)
+5. [Deployment: Self-Hosted Kubernetes](#5-deployment-self-hosted-kubernetes)
+6. [Deployment: Azure AKS (CI/CD)](#6-deployment-azure-aks-cicd)
 
 ---
 
@@ -92,6 +93,7 @@ MyDocs is a two-container application: a FastAPI backend and a Vue 3 SPA served 
 
 | Target | How to Deploy | Images From | Secrets From |
 |--------|--------------|-------------|--------------|
+| **Local dev (no Docker)** | `uvicorn` + `npm run dev` | n/a (source) | `.env` file |
 | **Docker Compose** | `docker compose up -d` | Built locally | `.env` file |
 | **Self-hosted K8s** | `kubectl apply -k deploy/k8s/overlays/self-hosted/` | Any registry | `secret.yml` (user-created) |
 | **Azure AKS** | Push to `azure-deployment` branch | Azure Container Registry | GitHub Secrets → kubectl |
@@ -186,16 +188,72 @@ The only minor naming difference: the spec's variables table says `AKS_CLUSTER_N
 
 ---
 
-## 3. Deployment: Docker Compose (Local)
+## 3. Local Development (No Docker)
+
+Run the backend and frontend directly from source for the fastest development loop — no containers needed.
 
 ### 3.1 Prerequisites
+
+- Python 3.13+ with a virtual environment (`python -m venv .venv`)
+- Node.js 22+ and npm
+- A MongoDB instance (local, Docker, or Atlas)
+- A `.env` file in the repository root (see the [Appendix](#appendix-environment-variable-reference) for the full variable list)
+
+### 3.2 Backend
+
+```bash
+source .venv/bin/activate
+pip install -e .
+uvicorn mydocs.backend.app:create_app --factory --host 0.0.0.0 --port 8000 --reload
+```
+
+The backend reads `.env` automatically. With `--reload`, code changes are picked up without restarting.
+
+### 3.3 Frontend
+
+```bash
+cd mydocs-ui
+npm install
+npm run dev
+```
+
+Vite starts on **http://localhost:5173** and proxies `/api` and `/health` requests to `localhost:8000` (configured in `vite.config.ts`).
+
+### 3.4 Auth Disabled by Default
+
+Leave `ENTRA_TENANT_ID` and `VITE_ENTRA_CLIENT_ID` empty (or unset) in your `.env`:
+
+- **Backend**: skips JWT validation, returns a stub `local-dev` user.
+- **Frontend**: the Vue Router guard bypasses the login redirect entirely.
+
+No Entra ID app registration is needed for local development.
+
+### 3.5 Storage
+
+Set `MYDOCS_STORAGE_BACKEND=local` (the default). Create the data and config directories in the repository root:
+
+```bash
+mkdir -p data config
+```
+
+Place your `parser.yml` in `config/` if you have custom parsing configuration.
+
+### 3.6 Access
+
+Open **http://localhost:5173** — the gallery loads directly without a login redirect.
+
+---
+
+## 4. Deployment: Docker Compose (Local)
+
+### 4.1 Prerequisites
 
 - Docker Engine 20+ and Docker Compose v2
 - A MongoDB instance (local, Docker, or Atlas)
 - (Optional) Azure API keys for Document Intelligence and OpenAI features
 - (Optional) Microsoft Entra ID app registration for OAuth
 
-### 3.2 Step-by-Step
+### 4.2 Step-by-Step
 
 **1. Clone the repository:**
 
@@ -272,7 +330,7 @@ docker compose logs -f ui
 docker compose down
 ```
 
-### 3.3 Enabling OAuth Locally
+### 4.3 Enabling OAuth Locally
 
 If you want to test authentication locally:
 
@@ -291,7 +349,7 @@ If you want to test authentication locally:
    docker compose up -d
    ```
 
-### 3.4 Using Azure Blob Storage
+### 4.4 Using Azure Blob Storage
 
 To use Azure Blob Storage instead of local file storage:
 
@@ -310,9 +368,9 @@ AZURE_STORAGE_CONTAINER_NAME=managed
 
 ---
 
-## 4. Deployment: Self-Hosted Kubernetes
+## 5. Deployment: Self-Hosted Kubernetes
 
-### 4.1 Prerequisites
+### 5.1 Prerequisites
 
 - A Kubernetes cluster (any: on-prem, Minikube, k3s, kind, etc.)
 - `kubectl` configured to connect to your cluster
@@ -321,7 +379,7 @@ AZURE_STORAGE_CONTAINER_NAME=managed
 - A container registry accessible from your cluster
 - Docker for building images
 
-### 4.2 Step-by-Step
+### 5.2 Step-by-Step
 
 **1. Build and push images:**
 
@@ -422,7 +480,7 @@ kubectl port-forward -n mydocs svc/ui 8080:80
 # Then open http://localhost:8080
 ```
 
-### 4.3 Customization Options
+### 5.3 Customization Options
 
 | Setting | How to Customize |
 |---------|-----------------|
@@ -432,7 +490,7 @@ kubectl port-forward -n mydocs svc/ui 8080:80
 | **Replicas** | Add a Kustomize patch increasing `replicas` on backend/UI deployments |
 | **Ingress class** | Change `ingressClassName` in `ingress.yml` if not using nginx |
 
-### 4.4 Updating
+### 5.4 Updating
 
 ```bash
 TAG=$(git rev-parse --short HEAD)
@@ -453,9 +511,9 @@ kubectl apply -k .
 
 ---
 
-## 5. Deployment: Azure AKS (CI/CD)
+## 6. Deployment: Azure AKS (CI/CD)
 
-### 5.1 Prerequisites
+### 6.1 Prerequisites
 
 **Local tools**:
 
@@ -470,7 +528,7 @@ kubectl apply -k .
 - Azure Document Intelligence — endpoint and API key
 - Azure OpenAI — endpoint and API key
 
-### 5.2 Create Azure Resources
+### 6.2 Create Azure Resources
 
 Resource naming convention: `{type}-{project}` (e.g., `rg-mydocs`, `aks-mydocs`). ACR names must be alphanumeric only (e.g., `acrmydocs`).
 
@@ -547,7 +605,7 @@ rules:
   - host: <INGRESS_IP>.nip.io   # e.g., 20.103.70.81.nip.io
 ```
 
-### 5.3 Set Up GitHub OIDC (CI/CD Authentication)
+### 6.3 Set Up GitHub OIDC (CI/CD Authentication)
 
 The CI/CD pipeline uses OIDC federated credentials — no stored passwords.
 
@@ -579,7 +637,7 @@ echo "AZURE_TENANT_ID: $TENANT_ID"
 echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
 ```
 
-### 5.4 Set Up Microsoft Entra ID (OAuth)
+### 6.4 Set Up Microsoft Entra ID (OAuth)
 
 **1. Create the app registration:**
 
@@ -678,7 +736,7 @@ The invited user must accept the email invitation before they can sign in.
 
 For tenant-internal users, skip the invitation step and use their Object ID directly.
 
-### 5.5 TLS / HTTPS
+### 6.5 TLS / HTTPS
 
 MSAL SPA requires HTTPS. Choose one approach:
 
@@ -733,16 +791,16 @@ The Azure overlay (`deploy/k8s/overlays/azure/ingress-patch.yml`) adds TLS via c
 3. Point a DNS A record to the ingress controller's external IP
 4. Re-enable the TLS patch in `deploy/k8s/overlays/azure/kustomization.yaml`
 
-### 5.6 GitHub Configuration
+### 6.6 GitHub Configuration
 
 #### Secrets (Settings → Secrets and variables → Actions → Secrets)
 
 | Secret | Description | Example |
 |--------|-------------|---------|
-| `AZURE_CLIENT_ID` | Service principal client ID (from §5.3) | `xxxxxxxx-xxxx-...` |
+| `AZURE_CLIENT_ID` | Service principal client ID (from §6.3) | `xxxxxxxx-xxxx-...` |
 | `AZURE_TENANT_ID` | Azure AD tenant ID | `xxxxxxxx-xxxx-...` |
 | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `xxxxxxxx-xxxx-...` |
-| `ENTRA_CLIENT_ID` | OAuth app client ID (from §5.4) | `xxxxxxxx-xxxx-...` |
+| `ENTRA_CLIENT_ID` | OAuth app client ID (from §6.4) | `xxxxxxxx-xxxx-...` |
 | `ENTRA_TENANT_ID` | Same as `AZURE_TENANT_ID` | `xxxxxxxx-xxxx-...` |
 | `ENTRA_AUTHORITY` | Entra authority URL | `https://login.microsoftonline.com/<tenant-id>` |
 | `MONGO_URL` | MongoDB connection string | `mongodb+srv://cluster.mongodb.net` |
@@ -776,7 +834,7 @@ gh secret set SECRET_NAME --body "value" --repo OWNER/REPO
 gh variable set VAR_NAME --body "value" --repo OWNER/REPO
 ```
 
-### 5.7 Trigger a Deployment
+### 6.7 Trigger a Deployment
 
 **Option A: Push to the deployment branch**
 
@@ -801,7 +859,7 @@ Go to Actions → "Deploy to Azure AKS" → Run workflow. Optionally provide a c
 
 Opening a PR targeting `azure-deployment` will run the build job only (no deploy), validating that images build successfully.
 
-### 5.8 Pipeline Flow
+### 6.8 Pipeline Flow
 
 ```
 push to azure-deployment
@@ -835,7 +893,7 @@ push to azure-deployment
 └───────────────────────────────┘
 ```
 
-### 5.9 Post-Deployment Verification
+### 6.9 Post-Deployment Verification
 
 ```bash
 # Get AKS credentials locally
@@ -856,19 +914,19 @@ kubectl port-forward -n mydocs svc/backend 8000:8000
 curl http://localhost:8000/health
 ```
 
-### 5.10 Troubleshooting
+### 6.10 Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Backend `CrashLoopBackOff` with MongoDB SSL error | AKS outbound IP not in MongoDB Atlas allowlist | Get IP: `az aks show --name aks-mydocs --resource-group rg-mydocs --query "networkProfile.loadBalancerProfile.effectiveOutboundIPs[].id" -o tsv \| xargs -I{} az network public-ip show --ids {} --query ipAddress -o tsv`. Add it to Atlas Network Access. |
 | Login succeeds but immediate sign-out (401 loop) | JWT audience mismatch — token has `aud=api://{clientId}` but backend expects `{clientId}` | Backend already accepts both formats. Ensure the Application ID URI (`api://{clientId}`) and `access_as_user` scope are configured on the app registration. |
 | Login succeeds but immediate sign-out (issuer mismatch) | Entra issues v1 tokens with `iss=https://sts.windows.net/{tenant}/` | Backend accepts both v1 and v2 issuers. Optionally set `accessTokenAcceptedVersion: 2` on the app to get v2 tokens. |
-| Blank page on HTTP | MSAL SPA requires HTTPS for redirect URIs (except localhost) | Set up TLS (self-signed or cert-manager). See §5.5. |
+| Blank page on HTTP | MSAL SPA requires HTTPS for redirect URIs (except localhost) | Set up TLS (self-signed or cert-manager). See §6.5. |
 | Upload fails with `ClientAuthenticationError` on Blob Storage | Pod can't authenticate with Azure Blob Storage | Add `AZURE_STORAGE_ACCOUNT_KEY` as a GitHub Secret, or configure workload identity with `Storage Blob Data Contributor` role. |
 | `Standard_B2s` not available | VM size restricted in subscription | Use `standard_b2s_v2` or check available sizes: `az vm list-skus --location westeurope --size Standard_B --output table` |
 | Resource provider not registered | First use of ACR/AKS in subscription | Run `az provider register --namespace Microsoft.ContainerRegistry` (and `Microsoft.ContainerService`). Wait 1-2 minutes. |
 
-### 5.11 Rollback
+### 6.11 Rollback
 
 ```bash
 # View deployment history
@@ -881,11 +939,11 @@ kubectl rollout undo deployment/ui -n mydocs
 
 ---
 
-## 6. Storage Backend Selection
+## 7. Storage Backend Selection
 
 The application supports two storage backends for managed files. The choice of backend interacts with the deployment target:
 
-### 6.1 Which Backend to Use
+### 7.1 Which Backend to Use
 
 | Deployment Target | Recommended Backend | Why |
 |-------------------|-------------------|-----|
@@ -895,14 +953,14 @@ The application supports two storage backends for managed files. The choice of b
 | **Self-hosted K8s** (multi-replica) | `azure_blob` | Avoids `ReadWriteMany` PVC requirement. |
 | **Azure AKS** | `azure_blob` | Native fit. Uses managed identity. No PVC for files. Scales horizontally. |
 
-### 6.2 Impact on PVC
+### 7.2 Impact on PVC
 
 | Backend | PVC at `/app/data` | Size Guidance |
 |---------|-------------------|---------------|
 | `local` | **Required** — stores all managed files, uploads, sidecars, DI cache | 10Gi+ depending on document volume |
 | `azure_blob` | **Optional** — only for upload staging and DI cache | 2Gi is typically sufficient |
 
-### 6.3 Impact on Ingestion Mode
+### 7.3 Impact on Ingestion Mode
 
 | Ingestion Mode | `local` backend | `azure_blob` backend |
 |---------------|-----------------|---------------------|
@@ -911,7 +969,7 @@ The application supports two storage backends for managed files. The choice of b
 
 **Recommendation for K8s/AKS**: Always use managed mode. Use the upload endpoint (`POST /api/v1/documents/upload`) or ingest with `storage_mode: managed`. External mode requires manual volume mounts for the original file paths.
 
-### 6.4 Migrating Between Backends
+### 7.4 Migrating Between Backends
 
 When moving from Docker Compose (local) to AKS (azure_blob), migrate existing files:
 
@@ -933,7 +991,7 @@ mydocs sync run
 
 Migration is idempotent — re-running skips files already on the target. Use `--delete-source` to clean up source files after a successful migration.
 
-### 6.5 AKS GitHub Secrets for Azure Blob Storage
+### 7.5 AKS GitHub Secrets for Azure Blob Storage
 
 When using `azure_blob` backend with AKS CI/CD, add these GitHub Secrets:
 

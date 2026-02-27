@@ -58,11 +58,13 @@ const router = createRouter({
 
 router.beforeEach((to, _from) => {
   // Auth guard: redirect unauthenticated users to /login
+  // Skip entirely when VITE_ENTRA_CLIENT_ID is empty (mirrors backend's ENTRA_TENANT_ID bypass)
+  const authEnabled = !!import.meta.env.VITE_ENTRA_CLIENT_ID
   const { isAuthenticated } = useAuth()
-  if (!to.meta.public && !isAuthenticated.value) {
+  if (authEnabled && !to.meta.public && !isAuthenticated.value) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.name === 'login' && isAuthenticated.value) {
+  if (authEnabled && to.name === 'login' && isAuthenticated.value) {
     return { path: '/' }
   }
 

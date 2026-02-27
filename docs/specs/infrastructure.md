@@ -761,7 +761,7 @@ Authentication is implemented using **Microsoft Entra ID** (Azure AD) with an OA
 
 ### 9.2 Local Development
 
-When `ENTRA_TENANT_ID` is **unset or empty**, the backend skips token validation entirely and returns a stub user (`local-dev`). The UI will also skip the login redirect when `VITE_ENTRA_CLIENT_ID` is empty. This allows the application to run without any Entra ID configuration during local development.
+When `ENTRA_TENANT_ID` is **unset or empty**, the backend skips token validation entirely and returns a stub user (`local-dev`). On the frontend, the Vue Router `beforeEach` guard checks `VITE_ENTRA_CLIENT_ID` — when empty, it bypasses the auth guard entirely (no redirect to `/login`, no authenticated-user check). This allows the application to run without any Entra ID configuration during local development.
 
 ### 9.3 Configuration
 
