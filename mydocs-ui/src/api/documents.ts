@@ -100,3 +100,11 @@ export async function deleteDocument(documentId: string): Promise<void> {
 export function getDocumentFileUrl(documentId: string): string {
   return `/api/v1/documents/${documentId}/file`
 }
+
+export function getDocumentThumbnailUrl(documentId: string, width = 300): string {
+  return `/api/v1/documents/${documentId}/thumbnail?width=${width}`
+}
+
+export function getPageImageUrl(documentId: string, pageNumber: number, width = 800): string {
+  return `/api/v1/documents/${documentId}/pages/${pageNumber}/image?width=${width}`
+}

@@ -22,7 +22,7 @@
 | HTTP           | Axios                         | Axios 1.7.9                   | Match |
 | Routing        | Vue Router 4                  | Vue Router 4.5.0              | Match |
 | Icons          | Lucide Vue Next               | lucide-vue-next 0.469.0       | Match |
-| PDF Viewer     | PDF.js (`pdfjs-dist`)         | pdfjs-dist 4.9.155            | Match |
+| PDF Viewer     | `vue-pdf-embed` (PDF.js wrapper) | vue-pdf-embed 2.1.3 + pdfjs-dist 4.9.155 | Match |
 | Date Picker    | `@vuepic/vue-datepicker`      | @vuepic/vue-datepicker 12.1.0 | Match |
 | Notifications  | Vue Toastification            | vue-toastification 2.0.0-rc.5 | Match |
 | Auth           | `@azure/msal-browser`         | @azure/msal-browser 4.8.0     | Match |
@@ -57,12 +57,12 @@ The directory structure broadly matches the spec. Below are deviations:
 |---|---|---|---|
 | `views/` | 11 files (2 active + 9 legacy) | 11 files | Match |
 | `components/layout/` | 6 files | 6 files | Match |
-| `components/gallery/` | 5 files | 5 files | Match |
+| `components/gallery/` | 5 files (+1 new) | 6 files (added PageResultsGrid.vue) | Match |
 | `components/common/` | 9 files | 9 files | Match |
 | `components/upload/` | 3 files | 3 files | Match |
 | `components/documents/` | 5 files | 5 files | Match |
-| `components/search/` | 5 files | 5 files | Match |
-| `components/viewer/` | 6 files | 6 files | Match |
+| `components/search/` | 5 files (+1 new) | 6 files (added PageCard.vue) | Match |
+| `components/viewer/` | 9 files | 9 files (added PageViewer, PageImageViewer, MarkdownViewer, HtmlViewer; removed ThumbnailSidebar) | Match |
 | `components/cases/` | 4 files | 4 files | Match |
 | `stores/` | 6 files | 6 files | Match |
 | `composables/` | 5 files | 5 files | Match |
@@ -159,17 +159,17 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
-| Unified gallery: no `?q=` shows documents, with `?q=` shows search | Dual mode based on URL | Implemented: syncs URL params, switches between DocumentGrid and SearchResultsList | Match |
+| Unified gallery: no `?q=` shows documents, with `?q=` shows page results | Dual mode based on URL | Implemented: syncs URL params, switches between DocumentGrid and PageResultsGrid | Match |
 | Gallery Toolbar: result count + view toggle | Required | GalleryToolbar with count and grid/list toggle | Match |
-| Document grid/list | DocumentGrid renders cards (grid) or rows (list) | DocumentGrid switches between card grid and DocumentTable list view | Match |
-| Sidebar filters | Collapsible status, file type, doc type, sort, advanced (tags, date range) | SidebarNav with all filter sections | Match |
+| Document cards with thumbnails | Cards show: thumbnail, file name, page count, size, status, tags | DocumentCard with lazy-loaded thumbnails from backend endpoint | Match |
+| Page result cards with thumbnails | Cards show: page thumbnail, document name, page badge, snippet, score | PageCard with page images from backend endpoint | Match |
+| Sidebar search options | Base filters + sorting + advanced search settings (in advanced mode) | SidebarNav reorganized with filters, sorting, and SearchAdvancedPanel | Match |
+| Sorting options | Created date, modified date, size, number of pages, ascending/descending | Sort dropdown updated with new options | Match |
 | Active filter chips | Colored pills, click to remove | Implemented in SidebarNav | Match |
 | Pagination | Page size selector (25, 50, 100) + page navigation | PaginationBar component | Match |
 | Bulk actions bar | Appears on selection: Parse, Add Tags, Remove Tags, Assign to Case, Delete | BulkActionsBar with parse, tag, delete, add-to-case | Match |
-| Search results list | Cards with file name, page number, score, snippet, highlights | SearchResultsList + SearchResultCard | Match |
 | Search debounce | 300ms in Top Bar | Debounced search input in TopBar | Match |
 | Filter sync to URL | `router.replace()` for bookmarkable views | Implemented via URL query param sync | Match |
-| **Filter sections collapsed by default** | Status, File Type start collapsed | **Need to verify default collapsed state** | Likely Match |
 
 #### Advanced Mode Additions
 
@@ -184,35 +184,46 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 
 ### 5.3 Document Viewer (Right Panel)
 
+The viewer now supports **two modes**: Document Mode and Page Mode.
+
 | Element | Spec | Actual | Status |
 |---|---|---|---|
 | Resizable side panel | 300px – 75% viewport, default 420px | RightViewerPanel with mouse-drag resize | Match |
-| Panel header | Doc name + Info, Maximize, Close buttons | Header with doc name, info toggle, close | Match |
-| PDF Viewer (full height) | Canvas + text layer fills between header and toolbar | PdfViewer with canvas rendering + text layer | Match |
-| Info panel slide-over | Toggled by info button; metadata, tags, duplicates, advanced | Slide-over panel with metadata, tags, duplicates (static "none detected"), advanced (ID, parser) | Match |
-| Bottom toolbar | Page nav (Prev/Next + "Page N/Total") + search result nav ("Result X of Y") | Implemented with both page nav and search result navigation | Match |
+| Viewer modes | Document Mode (PDF + Markdown tabs) and Page Mode (Image + HTML + Markdown tabs) | Implemented with `viewerMode` state in app store | Match |
+| Panel header | Doc name (+ page in page mode), Info/Maximize/Close buttons, Back button in page mode | Header with mode-appropriate title, back navigation | Match |
+| Info panel slide-over | Toggled by info button; metadata, tags, duplicates, advanced | Slide-over panel with metadata, tags, duplicates, advanced | Match |
+| Bottom toolbar | Page nav + "Go to Page" button (doc mode) + search result nav | Implemented with mode-switching | Match |
 | Tablet/mobile: full-screen overlay | Fixed position, z-50 | Responsive behavior implemented | Match |
 
-#### PDF Viewer Details
+#### Document Mode
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
-| Page canvas | High-res PDF.js canvas | Canvas rendering with devicePixelRatio scaling | Match |
-| Text layer | Transparent overlay for selection + highlight | PDF.js TextLayer API used | Match |
-| Page navigation | Prev/Next, page input, total count, arrow keys | Implemented | Match |
-| Zoom controls | Zoom in/out, fit-to-width, fit-to-page | ViewerToolbar has zoom controls | Match |
-| **Pinch-to-zoom** | On touch devices | **Not implemented** | **[NOT IMPLEMENTED]** |
-| **Thumbnail sidebar** | Vertical strip of page thumbnails, click to jump | **Page number buttons only — no actual rendered thumbnails** | **[DEVIATION]** Renders numbers, not thumbnail images |
-| Highlight overlay | Mark elements on text layer spans for query matches | Implemented: `applyHighlights()` walks text spans, wraps matches in `<mark>` elements | Match |
-| Search result nav | "Result X of Y" with Prev/Next across pages/documents | Implemented in bottom toolbar | Match |
-| **Element annotations** | Tooltip on hover/click showing element type, short_id, text | **Not implemented** | **[NOT IMPLEMENTED]** |
+| Tab bar | PDF and Markdown tabs | Implemented in DocumentViewer.vue | Match |
+| PDF tab | vue-pdf-embed rendering with text layer, annotation layer | PdfViewer.vue using vue-pdf-embed | Match |
+| Markdown tab | Renders document.content as formatted markdown with Raw toggle | MarkdownViewer.vue with rendered/raw modes | Match |
+| "Go to Page" button | Switches to Page Mode for current page | Implemented in bottom toolbar | Match |
+| Page navigation | Prev/Next + "Page N / Total" | Implemented | Match |
+| Search result nav | "Result X of Y" with Prev/Next | Implemented in bottom toolbar | Match |
+
+#### Page Mode
+
+| Element | Spec | Actual | Status |
+|---|---|---|---|
+| Tab bar | Page View, HTML, Markdown tabs | Implemented in PageViewer.vue | Match |
+| Page View tab | Page image from backend + client-side highlight overlays | PageImageViewer.vue with overlay positioning | Match |
+| HTML tab | Rendered HTML + Raw toggle | HtmlViewer.vue with rendered/raw modes | Match |
+| Markdown tab | Rendered markdown + Raw toggle | MarkdownViewer.vue with rendered/raw modes | Match |
+| Back button | Returns to Document Mode | Implemented in header | Match |
+| Page navigation | Prev/Next within document | Implemented | Match |
+| **Element annotations** | Tooltips on highlighted regions | **Planned for future** | **[NOT IMPLEMENTED]** |
 
 #### Image Viewer Details
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
 | Image display | Scaled to fit, zoom (scroll/pinch), pan (drag) | ImageViewer with zoom support | Match |
-| **Highlight overlay** | Bounding-box highlights over matched regions | **Not implemented for images** | **[NOT IMPLEMENTED]** |
+| **Highlight overlay** | Bounding-box highlights over matched regions | PageImageViewer has highlight overlay support | Match |
 
 #### Viewer Toolbar
 
@@ -492,7 +503,7 @@ Fonts loaded via Google Fonts in `index.html`:
 | **Virtual scrolling** | Lists > 100 items | **Not implemented** | **[NOT IMPLEMENTED]** |
 | Debounced search | 300ms debounce | Implemented in TopBar | Match |
 | PDF page caching | LRU max 10 pages | **Not implemented; renders single current page** | **[NOT IMPLEMENTED]** |
-| **Image thumbnails** | Server-generated thumbnails with lazy loading | **Not implemented** | **[NOT IMPLEMENTED]** |
+| **Image thumbnails** | Server-generated thumbnails with lazy loading | Implemented: backend generates thumbnails via PyMuPDF, cached in storage; frontend lazy-loads via IntersectionObserver | Match |
 | Bundle size | PDF.js worker as separate chunk; Tailwind purge | PDF.js worker loaded; Tailwind v4 auto-purges | Match |
 | URL-driven state | Filters synced to URL params | Implemented | Match |
 
@@ -506,7 +517,7 @@ Fonts loaded via Google Fonts in `index.html`:
 |---|---|---|---|
 | D1 | Settings Drawer | Missing: default search mode, default top_k, parser defaults, connection info. Only has theme, mode, and about. | 3.6 |
 | D2 | Upload Modal | Missing: storage mode selector, recursive toggle, parse-after-upload toggle, server-path ingestion. All hardcoded to defaults. | 3.1 |
-| D3 | Thumbnail Sidebar | Renders page numbers instead of actual PDF page thumbnail images. | 3.3 |
+| ~~D3~~ | ~~Thumbnail Sidebar~~ | ~~Resolved: Viewer redesigned with document/page mode tabs. PDF thumbnail sidebar removed in favor of new architecture.~~ | 3.3 |
 | D4 | Tag Editing in Viewer | Tags displayed as read-only badges in the info panel, not as editable TagInput. | 3.4 |
 
 ### Missing Features
@@ -515,10 +526,10 @@ Fonts loaded via Google Fonts in `index.html`:
 |---|---|---|---|
 | M1 | Pinch-to-zoom | Touch device pinch-to-zoom for PDF viewer not implemented. | 3.3 |
 | M2 | Element annotations | Hover/click tooltips showing element type, short_id, extracted text not implemented. | 3.3 |
-| M3 | Image highlight overlay | Bounding-box highlights for image documents not implemented. | 3.3 |
+| ~~M3~~ | ~~Image highlight overlay~~ | ~~Resolved: PageImageViewer component supports highlight overlays using bounding polygon coordinates.~~ | 3.3 |
 | M4 | Virtual scrolling | No virtual scrolling for long document or search result lists. | 10 |
 | M5 | PDF page caching | No LRU cache for decoded PDF pages. | 10 |
-| M6 | Image thumbnails | No server-generated thumbnails for document grid. | 10 |
+| ~~M6~~ | ~~Image thumbnails~~ | ~~Resolved: Backend generates thumbnails via PyMuPDF, cached in storage alongside files.~~ | 10 |
 | M7 | Lazy route loading | Routes use direct imports instead of lazy-loaded dynamic imports. | 5 / 10 |
 
 ### Dead Code

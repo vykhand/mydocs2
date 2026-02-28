@@ -4,6 +4,7 @@ import os
 import re
 from typing import Optional
 
+import fitz  # PyMuPDF
 from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
@@ -221,6 +222,158 @@ async def get_document_file(document_id: str):
     )
 
 
+def _render_pdf_page_to_png(file_bytes: bytes, page_number: int, width: int) -> bytes:
+    """Render a single PDF page to PNG using PyMuPDF.
+
+    Args:
+        file_bytes: Raw PDF file bytes.
+        page_number: 0-indexed page number.
+        width: Target width in pixels.
+
+    Returns:
+        PNG image bytes.
+    """
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    try:
+        if page_number >= len(doc):
+            raise ValueError(f"Page {page_number} exceeds document page count ({len(doc)})")
+        page = doc[page_number]
+        # Calculate zoom factor to achieve target width
+        zoom = width / page.rect.width
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        return pix.tobytes("png")
+    finally:
+        doc.close()
+
+
+async def _get_file_bytes_for_doc(doc: Document) -> bytes | None:
+    """Retrieve file bytes for a document from the appropriate storage backend."""
+    file_path = doc.managed_path or doc.original_path
+    if not file_path:
+        return None
+
+    storage = get_storage(doc.storage_backend)
+    try:
+        return await storage.get_file_bytes(file_path)
+    except Exception:
+        return None
+
+
+@router.get("/{document_id}/thumbnail")
+async def get_document_thumbnail(
+    document_id: str,
+    width: int = Query(300, ge=50, le=800),
+):
+    """Return a PNG thumbnail of the document's first page.
+
+    Thumbnails are cached in managed storage as {doc_id}.thumb.png.
+    """
+    doc = await Document.aget(document_id)
+    if not doc:
+        return _error(404, "DOCUMENT_NOT_FOUND", f"Document {document_id} not found")
+
+    # Check for cached thumbnail
+    storage = get_storage(doc.storage_backend)
+    thumb_name = f"{doc.id}.thumb.png"
+
+    # Try to serve cached thumbnail
+    if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
+        from mydocs.parsing.storage.azure_blob import make_az_uri, parse_az_uri
+        if doc.managed_path:
+            container, _ = parse_az_uri(doc.managed_path)
+            thumb_path = make_az_uri(container, thumb_name)
+        else:
+            thumb_path = None
+    else:
+        managed_root = os.path.join(C.DATA_FOLDER, "managed")
+        thumb_path = os.path.join(managed_root, thumb_name)
+
+    if thumb_path:
+        try:
+            cached_bytes = await storage.get_file_bytes(thumb_path)
+            if cached_bytes:
+                return Response(content=cached_bytes, media_type="image/png")
+        except Exception:
+            pass  # No cached thumbnail, generate one
+
+    # Generate thumbnail
+    file_bytes = await _get_file_bytes_for_doc(doc)
+    if not file_bytes:
+        return _error(404, "FILE_NOT_FOUND", f"File not found for document {document_id}")
+
+    if doc.file_type == "pdf":
+        try:
+            png_bytes = _render_pdf_page_to_png(file_bytes, 0, width)
+        except Exception as e:
+            return _error(500, "THUMBNAIL_GENERATION_FAILED", str(e))
+    elif doc.file_type in ("jpeg", "png", "bmp", "tiff"):
+        # For images, resize to thumbnail using PyMuPDF
+        try:
+            img_doc = fitz.open(stream=file_bytes, filetype=doc.file_type)
+            page = img_doc[0]
+            zoom = width / page.rect.width
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            png_bytes = pix.tobytes("png")
+            img_doc.close()
+        except Exception as e:
+            return _error(500, "THUMBNAIL_GENERATION_FAILED", str(e))
+    else:
+        # Unsupported file type for thumbnail
+        return Response(status_code=204)
+
+    # Cache the thumbnail
+    try:
+        await storage.write_managed_bytes(doc.id, thumb_name, png_bytes)
+    except Exception:
+        pass  # Best-effort caching
+
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@router.get("/{document_id}/pages/{page_number}/image")
+async def get_page_image(
+    document_id: str,
+    page_number: int,
+    width: int = Query(800, ge=50, le=3000),
+    dpi: int = Query(150, ge=72, le=600),
+):
+    """Return a rendered PNG image of a specific document page."""
+    doc = await Document.aget(document_id)
+    if not doc:
+        return _error(404, "DOCUMENT_NOT_FOUND", f"Document {document_id} not found")
+
+    file_bytes = await _get_file_bytes_for_doc(doc)
+    if not file_bytes:
+        return _error(404, "FILE_NOT_FOUND", f"File not found for document {document_id}")
+
+    if doc.file_type == "pdf":
+        try:
+            # page_number from API is 1-indexed, PyMuPDF is 0-indexed
+            png_bytes = _render_pdf_page_to_png(file_bytes, page_number - 1, width)
+        except ValueError as e:
+            return _error(404, "PAGE_NOT_FOUND", str(e))
+        except Exception as e:
+            return _error(500, "PAGE_RENDER_FAILED", str(e))
+    elif doc.file_type in ("jpeg", "png", "bmp", "tiff"):
+        # For images, return the original image resized
+        try:
+            img_doc = fitz.open(stream=file_bytes, filetype=doc.file_type)
+            page = img_doc[0]
+            zoom = width / page.rect.width
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            png_bytes = pix.tobytes("png")
+            img_doc.close()
+        except Exception as e:
+            return _error(500, "PAGE_RENDER_FAILED", str(e))
+    else:
+        return _error(400, "UNSUPPORTED_FORMAT", f"Page image not supported for {doc.file_type} files")
+
+    return Response(content=png_bytes, media_type="image/png")
+
+
 @router.get("/{document_id}/pages")
 async def get_pages(document_id: str):
     doc = await Document.aget(document_id)
@@ -275,25 +428,29 @@ async def delete_document(document_id: str):
     # Delete pages
     await DocumentPage.adelete_many({"document_id": document_id})
 
-    # Delete managed file and sidecar via storage backend
+    # Delete managed file, sidecar, and cached thumbnail via storage backend
     if doc.managed_path:
         storage = get_storage(doc.storage_backend)
         try:
             await storage.delete_file(doc.managed_path)
         except Exception:
             pass  # Best-effort deletion
-        # Delete managed sidecar
+        # Delete managed sidecar and cached thumbnail
         try:
             if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
                 from mydocs.parsing.storage.azure_blob import make_az_uri, parse_az_uri
                 container, _ = parse_az_uri(doc.managed_path)
                 sidecar_blob = make_az_uri(container, f"{doc.id}.metadata.json")
                 await storage.delete_file(sidecar_blob)
+                thumb_blob = make_az_uri(container, f"{doc.id}.thumb.png")
+                await storage.delete_file(thumb_blob)
             else:
                 sidecar_path = os.path.join(os.path.dirname(doc.managed_path), f"{doc.id}.metadata.json")
                 await storage.delete_file(sidecar_path)
+                thumb_path = os.path.join(os.path.dirname(doc.managed_path), f"{doc.id}.thumb.png")
+                await storage.delete_file(thumb_path)
         except Exception:
-            pass  # Best-effort sidecar deletion
+            pass  # Best-effort sidecar/thumbnail deletion
 
     # Delete sidecar metadata file for external mode (never delete the original file)
     if doc.storage_mode == StorageModeEnum.EXTERNAL and doc.original_path:

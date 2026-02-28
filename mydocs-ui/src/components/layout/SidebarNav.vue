@@ -2,9 +2,11 @@
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useDocumentsStore } from '@/stores/documents'
+import { useSearchStore } from '@/stores/search'
 import { FileText, Briefcase, Filter, ChevronDown } from 'lucide-vue-next'
 import TagInput from '@/components/common/TagInput.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import SearchAdvancedPanel from '@/components/search/SearchAdvancedPanel.vue'
 import { ref, computed } from 'vue'
 
 defineProps<{
@@ -16,9 +18,9 @@ const router = useRouter()
 const appStore = useAppStore()
 const docsStore = useDocumentsStore()
 
-const showAdvancedFilters = ref(false)
 const showStatusFilter = ref(false)
 const showFileTypeFilter = ref(false)
+const showAdvancedSearch = ref(false)
 
 const tabs = [
   { key: 'documents' as const, label: 'Documents', icon: FileText },
@@ -71,6 +73,9 @@ function syncFiltersToUrl() {
   if (docsStore.filters.tags) query.tags = docsStore.filters.tags
   if (docsStore.filters.sort_by && docsStore.filters.sort_by !== 'created_at') query.sort_by = docsStore.filters.sort_by
   if (docsStore.filters.sort_order && docsStore.filters.sort_order !== 'desc') query.sort_order = docsStore.filters.sort_order
+  if (docsStore.filters.document_type) query.document_type = docsStore.filters.document_type
+  if (docsStore.filters.date_from) query.date_from = docsStore.filters.date_from
+  if (docsStore.filters.date_to) query.date_to = docsStore.filters.date_to
   router.replace({ path: route.path, query })
 }
 
@@ -80,6 +85,9 @@ const activeFilterChips = computed(() => {
   if (docsStore.filters.status) chips.push({ key: 'status', label: `Status: ${docsStore.filters.status}` })
   if (docsStore.filters.file_type) chips.push({ key: 'file_type', label: `Type: ${docsStore.filters.file_type}` })
   if (docsStore.filters.tags) chips.push({ key: 'tags', label: `Tags: ${docsStore.filters.tags}` })
+  if (docsStore.filters.document_type) chips.push({ key: 'document_type', label: `Doc: ${docsStore.filters.document_type}` })
+  if (docsStore.filters.date_from) chips.push({ key: 'date_from', label: `From: ${docsStore.filters.date_from}` })
+  if (docsStore.filters.date_to) chips.push({ key: 'date_to', label: `To: ${docsStore.filters.date_to}` })
   return chips
 })
 
@@ -87,6 +95,9 @@ function removeChip(key: string) {
   if (key === 'status') docsStore.filters.status = undefined
   if (key === 'file_type') docsStore.filters.file_type = undefined
   if (key === 'tags') docsStore.filters.tags = undefined
+  if (key === 'document_type') docsStore.filters.document_type = undefined
+  if (key === 'date_from') docsStore.filters.date_from = undefined
+  if (key === 'date_to') docsStore.filters.date_to = undefined
   syncFiltersToUrl()
 }
 </script>
@@ -129,7 +140,7 @@ function removeChip(key: string) {
       </button>
     </div>
 
-    <!-- Documents tab content -->
+    <!-- Documents tab: Search Options -->
     <div v-else-if="appStore.activeTab === 'documents'" class="flex-1 p-3 space-y-4">
       <!-- Active filter chips -->
       <div v-if="activeFilterChips.length" class="flex flex-wrap gap-1.5">
@@ -144,6 +155,9 @@ function removeChip(key: string) {
           <span class="text-white/80">&times;</span>
         </span>
       </div>
+
+      <!-- FILTERS section header -->
+      <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-text-secondary);">Filters</p>
 
       <!-- Status filter -->
       <div>
@@ -215,6 +229,24 @@ function removeChip(key: string) {
         </select>
       </div>
 
+      <!-- Created Date Range -->
+      <div>
+        <p class="text-xs font-medium mb-2 uppercase tracking-wide" style="color: var(--color-text-secondary);">Created Date Range</p>
+        <DateRangePicker />
+      </div>
+
+      <!-- Tags -->
+      <div>
+        <p class="text-xs font-medium mb-2 uppercase tracking-wide" style="color: var(--color-text-secondary);">Tags</p>
+        <TagInput :model-value="docsStore.filters.tags ? docsStore.filters.tags.split(',') : []" @update:model-value="(v: string[]) => { docsStore.filters.tags = v.length ? v.join(',') : undefined; syncFiltersToUrl() }" />
+      </div>
+
+      <!-- Divider -->
+      <hr style="border-color: var(--color-border);" />
+
+      <!-- SORTING section header -->
+      <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-text-secondary);">Sorting</p>
+
       <!-- Sort controls -->
       <div>
         <p class="text-xs font-medium mb-2 uppercase tracking-wide" style="color: var(--color-text-secondary);">Sort By</p>
@@ -226,6 +258,8 @@ function removeChip(key: string) {
         >
           <option value="created_at">Created Date</option>
           <option value="modified_at">Modified Date</option>
+          <option value="file_metadata.size_bytes">Size</option>
+          <option value="file_metadata.page_count">Number of Pages</option>
           <option value="original_file_name">Name</option>
           <option value="status">Status</option>
         </select>
@@ -240,25 +274,21 @@ function removeChip(key: string) {
         </select>
       </div>
 
-      <!-- Advanced Filters (collapsed by default) -->
-      <div>
+      <!-- Divider -->
+      <hr style="border-color: var(--color-border);" />
+
+      <!-- Advanced Search Settings (advanced mode only) -->
+      <div v-if="appStore.mode === 'advanced'">
         <button
-          @click="showAdvancedFilters = !showAdvancedFilters"
-          class="flex items-center gap-1 text-xs font-medium uppercase tracking-wide"
+          @click="showAdvancedSearch = !showAdvancedSearch"
+          class="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider"
           style="color: var(--color-text-secondary);"
         >
-          <ChevronDown :size="14" :class="{ 'rotate-180': showAdvancedFilters }" class="transition-transform" />
-          Advanced Filters
+          <ChevronDown :size="14" :class="{ 'rotate-180': showAdvancedSearch }" class="transition-transform" />
+          Advanced Search Settings
         </button>
-        <div v-if="showAdvancedFilters" class="mt-2 space-y-3">
-          <div>
-            <p class="text-xs mb-1" style="color: var(--color-text-secondary);">Tags</p>
-            <TagInput :model-value="docsStore.filters.tags ? docsStore.filters.tags.split(',') : []" @update:model-value="(v: string[]) => { docsStore.filters.tags = v.length ? v.join(',') : undefined; syncFiltersToUrl() }" />
-          </div>
-          <div>
-            <p class="text-xs mb-1" style="color: var(--color-text-secondary);">Date Range</p>
-            <DateRangePicker />
-          </div>
+        <div v-if="showAdvancedSearch" class="mt-3">
+          <SearchAdvancedPanel />
         </div>
       </div>
     </div>

@@ -337,6 +337,46 @@ Response: Binary file content
 
 Returns `404 FILE_NOT_FOUND` if the file is not present on disk.
 
+### 3.8.1 Get Document Thumbnail
+
+Returns a PNG thumbnail of the document's first page. Thumbnails are generated using PyMuPDF and cached in the storage backend alongside the document file as `{doc_id}.thumb.png`.
+
+```
+GET /api/v1/documents/{document_id}/thumbnail
+Query Parameters:
+    width:   (optional) Max width in pixels, default 300
+Response: image/png binary content
+```
+
+**Behavior:**
+- If a cached thumbnail exists in managed storage, it is served directly.
+- If no cached thumbnail exists, the backend generates one on-the-fly using PyMuPDF (`fitz`), caches it via `write_managed_bytes()`, and returns it.
+- For non-PDF files (images), the original file is resized to thumbnail dimensions.
+- For unsupported file types (DOCX, XLSX, etc.), returns a `204 No Content` response and the UI shows a placeholder icon.
+- Returns `404 FILE_NOT_FOUND` if the document or its file is not found.
+- For Azure Blob storage: the cached thumbnail is stored in the blob container and served via SAS URL redirect (same pattern as file download).
+
+**Cache invalidation:** Thumbnails are regenerated when a document is re-parsed (the parse endpoint deletes the cached thumbnail before parsing).
+
+### 3.8.2 Get Page Image
+
+Returns a rendered PNG image of a specific document page. Uses PyMuPDF to render the page at the requested resolution.
+
+```
+GET /api/v1/documents/{document_id}/pages/{page_number}/image
+Query Parameters:
+    width:   (optional) Max width in pixels, default 800
+    dpi:     (optional) Render DPI, default 150
+Response: image/png binary content
+```
+
+**Behavior:**
+- Renders the specified page of the document using PyMuPDF at the requested DPI.
+- Images are **not cached** by default (they are generated on each request). Future optimization may add caching for commonly accessed pages.
+- For image-type documents (JPEG, PNG, etc.), returns the original image (optionally resized).
+- Returns `404 FILE_NOT_FOUND` if the document file is not found.
+- Returns `404` if the `page_number` exceeds the document's total page count.
+
 ### 3.9 Get Pages
 ```
 GET /api/v1/documents/{document_id}/pages

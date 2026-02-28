@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, watch, onBeforeUnmount } from 'vue'
+import { computed, watch, onBeforeUnmount, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useResponsive } from '@/composables/useResponsive'
 import { useDocumentViewer } from '@/composables/useDocumentViewer'
 import DocumentViewer from '@/components/viewer/DocumentViewer.vue'
-import { X, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Info } from 'lucide-vue-next'
-import { ref } from 'vue'
+import PageViewer from '@/components/viewer/PageViewer.vue'
+import { X, Maximize2, ChevronLeft, ChevronRight, Info, ArrowRight, ArrowLeft } from 'lucide-vue-next'
 
 const panelWidth = defineModel<number>('panelWidth', { default: 420 })
 
@@ -19,6 +19,15 @@ const showInfoPanel = ref(false)
 const documentId = computed(() => appStore.viewerDocumentId)
 
 const viewer = useDocumentViewer(documentId, appStore.viewerPage)
+
+const isDocumentMode = computed(() => appStore.viewerMode === 'document')
+const isPageMode = computed(() => appStore.viewerMode === 'page')
+
+// Current page data for page mode
+const currentPageData = computed(() => {
+  if (!viewer.pages.value || !viewer.currentPage.value) return null
+  return viewer.pages.value.find(p => p.page_number === viewer.currentPage.value) || null
+})
 
 // Watch route query for page changes
 watch(() => route.query.page, (p) => {
@@ -33,11 +42,6 @@ watch(() => appStore.viewerPage, (newPage) => {
     viewer.goToPage(newPage)
   }
 })
-
-// Handle totalPagesResolved from PdfViewer
-function onTotalPagesResolved(total: number) {
-  viewer.totalPages.value = total
-}
 
 // Horizontal resize handle logic
 const isResizing = ref(false)
@@ -69,6 +73,23 @@ const searchResultLabel = computed(() => {
   return `Result ${appStore.viewerCurrentResultIndex + 1} of ${appStore.viewerSearchResults.length}`
 })
 
+// Header title
+const headerTitle = computed(() => {
+  const name = viewer.document.value?.original_file_name || 'Document Viewer'
+  if (isPageMode.value) {
+    return `${name} - Page ${viewer.currentPage.value}`
+  }
+  return name
+})
+
+function goToPageMode() {
+  appStore.switchToPageMode(viewer.currentPage.value)
+}
+
+function backToDocumentMode() {
+  appStore.switchToDocumentMode()
+}
+
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
@@ -91,10 +112,22 @@ onBeforeUnmount(() => {
     />
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-3 border-b shrink-0" style="border-color: var(--color-border);">
-      <h3 class="text-sm font-semibold truncate" style="color: var(--color-text-primary);">
-        {{ viewer.document.value?.original_file_name || 'Document Viewer' }}
-      </h3>
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-2 min-w-0">
+        <!-- Back button in page mode -->
+        <button
+          v-if="isPageMode"
+          @click="backToDocumentMode"
+          class="p-1 rounded hover:opacity-70 shrink-0"
+          style="color: var(--color-text-secondary);"
+          title="Back to document"
+        >
+          <ArrowLeft :size="16" />
+        </button>
+        <h3 class="text-sm font-semibold truncate" style="color: var(--color-text-primary);">
+          {{ headerTitle }}
+        </h3>
+      </div>
+      <div class="flex items-center gap-1 shrink-0">
         <button
           @click="showInfoPanel = !showInfoPanel"
           class="p-1 rounded hover:opacity-70"
@@ -121,22 +154,32 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Content area: PDF viewer fills available space -->
+    <!-- Content area -->
     <div class="flex-1 min-h-0 relative">
       <!-- Loading spinner -->
       <div v-if="viewer.loading.value" class="flex items-center justify-center h-full">
         <div class="animate-spin w-6 h-6 border-2 border-t-transparent rounded-full" style="border-color: var(--color-accent); border-top-color: transparent;" />
       </div>
 
-      <!-- Document viewer (full height) -->
+      <!-- Document Mode -->
       <DocumentViewer
-        v-else-if="viewer.document.value"
+        v-else-if="isDocumentMode && viewer.document.value"
         :document="viewer.document.value"
         :current-page="viewer.currentPage.value"
         :zoom="viewer.zoom.value"
         :file-url="viewer.fileUrl.value"
         :highlight-query="appStore.viewerHighlightQuery"
         @go-to-page="viewer.goToPage"
+        @total-pages-resolved="(n: number) => viewer.totalPages.value = n"
+        class="h-full"
+      />
+
+      <!-- Page Mode -->
+      <PageViewer
+        v-else-if="isPageMode && currentPageData && viewer.document.value"
+        :page="currentPageData"
+        :document-id="viewer.document.value.id"
+        :zoom="viewer.zoom.value"
         class="h-full"
       />
 
@@ -225,6 +268,18 @@ onBeforeUnmount(() => {
           title="Next page"
         >
           <ChevronRight :size="14" />
+        </button>
+
+        <!-- Go to Page button (document mode only) -->
+        <button
+          v-if="isDocumentMode"
+          @click="goToPageMode"
+          class="flex items-center gap-1 px-2 py-1 rounded text-xs hover:opacity-70"
+          style="color: var(--color-accent);"
+          title="View page details"
+        >
+          Go to Page
+          <ArrowRight :size="12" />
         </button>
       </div>
 

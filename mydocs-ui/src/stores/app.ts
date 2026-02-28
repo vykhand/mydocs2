@@ -6,6 +6,7 @@ export type AppMode = 'simple' | 'advanced'
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type ActiveTab = 'documents' | 'cases'
 export type GalleryViewMode = 'grid' | 'list'
+export type ViewerMode = 'document' | 'page'
 
 export const useAppStore = defineStore('app', () => {
   const mode = ref<AppMode>('simple')
@@ -18,6 +19,9 @@ export const useAppStore = defineStore('app', () => {
   const viewerPage = ref<number>(1)
   const activeTab = ref<ActiveTab>('documents')
   const galleryViewMode = ref<GalleryViewMode>('grid')
+
+  // Viewer mode: document or page
+  const viewerMode = ref<ViewerMode>('document')
 
   // Search viewer context
   const viewerHighlightQuery = ref('')
@@ -46,10 +50,11 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
-  function openViewer(id: string, page = 1, highlightQuery = '') {
+  function openViewer(id: string, page = 1, highlightQuery = '', mode: ViewerMode = 'document') {
     viewerDocumentId.value = id
     viewerPage.value = page
     viewerHighlightQuery.value = highlightQuery
+    viewerMode.value = mode
     viewerOpen.value = true
   }
 
@@ -57,9 +62,19 @@ export const useAppStore = defineStore('app', () => {
     viewerOpen.value = false
     viewerDocumentId.value = null
     viewerPage.value = 1
+    viewerMode.value = 'document'
     viewerHighlightQuery.value = ''
     viewerSearchResults.value = []
     viewerCurrentResultIndex.value = 0
+  }
+
+  function switchToPageMode(page?: number) {
+    viewerMode.value = 'page'
+    if (page !== undefined) viewerPage.value = page
+  }
+
+  function switchToDocumentMode() {
+    viewerMode.value = 'document'
   }
 
   function setViewerSearchContext(results: SearchResult[], query: string, startIndex: number) {
@@ -95,10 +110,11 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     mode, theme, sidebarCollapsed,
-    viewerOpen, viewerDocumentId, viewerPage, activeTab, galleryViewMode,
+    viewerOpen, viewerDocumentId, viewerPage, viewerMode, activeTab, galleryViewMode,
     viewerHighlightQuery, viewerSearchResults, viewerCurrentResultIndex,
     toggleMode, setTheme, applyTheme, toggleSidebar,
-    openViewer, closeViewer, setViewerSearchContext, nextSearchResult, prevSearchResult,
+    openViewer, closeViewer, switchToPageMode, switchToDocumentMode,
+    setViewerSearchContext, nextSearchResult, prevSearchResult,
   }
 }, {
   persist: {

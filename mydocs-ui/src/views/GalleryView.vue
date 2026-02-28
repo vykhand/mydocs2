@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { useDocumentsStore } from '@/stores/documents'
 import GalleryToolbar from '@/components/gallery/GalleryToolbar.vue'
 import DocumentGrid from '@/components/gallery/DocumentGrid.vue'
-import SearchResultsList from '@/components/gallery/SearchResultsList.vue'
+import PageResultsGrid from '@/components/gallery/PageResultsGrid.vue'
 import UploadModal from '@/components/gallery/UploadModal.vue'
 import SettingsDrawer from '@/components/gallery/SettingsDrawer.vue'
 import BulkActionsBar from '@/components/documents/BulkActionsBar.vue'
@@ -112,9 +112,10 @@ onMounted(() => {
     <!-- Search results mode -->
     <template v-if="hasSearchQuery">
       <LoadingSkeleton v-if="searchLoading" />
-      <SearchResultsList
+      <PageResultsGrid
         v-else-if="searchResults && searchResults.results.length"
         :results="searchResults.results"
+        :query="(route.query.q as string) || ''"
       />
       <EmptyState
         v-else

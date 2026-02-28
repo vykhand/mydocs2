@@ -283,6 +283,48 @@ GET http://localhost:8000/api/v1/documents/{{document_id}}/file
 
 ---
 
+#### `GET /api/v1/documents/{document_id}/thumbnail`
+
+Get a PNG thumbnail of the document's first page. Generated using PyMuPDF and cached in managed storage as `{doc_id}.thumb.png`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `width` | int | `300` | Max thumbnail width in pixels (50–800) |
+
+```http
+GET http://localhost:8000/api/v1/documents/{{document_id}}/thumbnail?width=300
+```
+
+**Response** `200`: `image/png` binary content.
+**Response** `204`: No content (file type not supported for thumbnail generation).
+
+**Errors**: `404 DOCUMENT_NOT_FOUND`, `404 FILE_NOT_FOUND`, `500 THUMBNAIL_GENERATION_FAILED`
+
+**Caching**: Thumbnails are cached in managed storage alongside document files. Cached thumbnails are deleted when a document is deleted.
+
+---
+
+#### `GET /api/v1/documents/{document_id}/pages/{page_number}/image`
+
+Get a rendered PNG image of a specific document page. Uses PyMuPDF for rendering.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `width` | int | `800` | Max image width in pixels (50–3000) |
+| `dpi` | int | `150` | Render DPI (72–600) |
+
+```http
+GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/1/image?width=800
+```
+
+**Response** `200`: `image/png` binary content.
+
+**Errors**: `404 DOCUMENT_NOT_FOUND`, `404 FILE_NOT_FOUND`, `404 PAGE_NOT_FOUND`, `400 UNSUPPORTED_FORMAT`, `500 PAGE_RENDER_FAILED`
+
+**Note**: Page numbers are 1-indexed (matching the API convention). Images are generated on-demand and not cached.
+
+---
+
 #### `GET /api/v1/documents/{document_id}/pages`
 
 Get all pages for a document.
