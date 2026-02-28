@@ -5,14 +5,23 @@ import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
 import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
 import { getPageThumbnailUrl } from '@/api/documents'
 import { formatFileSize, getDisplayStatus } from '@/utils/format'
-import { FileText, Files, Layers } from 'lucide-vue-next'
+import { FileText, Files, Layers, Check } from 'lucide-vue-next'
 import { computed } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   document: Document
+  selected?: boolean
+  selectionActive?: boolean
+}>(), {
+  selected: false,
+  selectionActive: false,
+})
+
+const emit = defineEmits<{
+  toggleSelect: []
 }>()
 
-const thumbnailUrl = computed(() => getPageThumbnailUrl(props.document.id, 1))
+const thumbnailUrl = computed(() => getPageThumbnailUrl(props.document.id, 1, 600))
 const displayStatus = computed(() => getDisplayStatus(props.document))
 const pageCount = computed(() => props.document.file_metadata?.page_count ?? 0)
 const subDocCount = computed(() => props.document.subdocuments?.length ?? 0)
@@ -32,16 +41,19 @@ const statusBadgeStyle = computed(() => {
 
 <template>
   <div
-    class="relative group rounded-lg border cursor-pointer hover:shadow-md transition-shadow overflow-hidden"
-    style="border-color: var(--color-border); background-color: var(--color-bg-secondary);"
+    class="relative group rounded-lg border-2 cursor-pointer hover:shadow-md transition-shadow overflow-hidden"
+    :style="{
+      borderColor: selected ? 'var(--color-accent)' : 'var(--color-border)',
+      backgroundColor: selected ? 'var(--color-accent-bg, rgba(59,130,246,0.05))' : 'var(--color-bg-secondary)',
+    }"
     @click="$router.push(`/doc/${document.id}`)"
   >
     <!-- Thumbnail -->
-    <div class="w-full h-36 overflow-hidden" style="background-color: var(--color-bg-tertiary);">
+    <div class="w-full h-48 overflow-hidden" style="background-color: var(--color-bg-tertiary);">
       <img
         :src="thumbnailUrl"
         :alt="document.original_file_name"
-        class="w-full h-full object-cover object-top"
+        class="w-full h-full object-contain object-top"
         loading="lazy"
         @error="($event.target as HTMLImageElement).style.display = 'none'"
       />
@@ -85,8 +97,24 @@ const statusBadgeStyle = computed(() => {
         </span>
       </div>
     </div>
+    <!-- Selection checkbox (visible on hover or when any card is selected) -->
     <div
-      class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+      class="absolute top-2 right-2 z-10 transition-opacity"
+      :class="selected || selectionActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+      @click.stop="emit('toggleSelect')"
+    >
+      <div
+        class="w-6 h-6 rounded border-2 flex items-center justify-center cursor-pointer transition-colors"
+        :style="{
+          borderColor: selected ? 'var(--color-accent)' : 'rgba(255,255,255,0.8)',
+          backgroundColor: selected ? 'var(--color-accent)' : 'rgba(0,0,0,0.3)',
+        }"
+      >
+        <Check v-if="selected" :size="14" style="color: white;" />
+      </div>
+    </div>
+    <div
+      class="absolute top-2 right-10 opacity-0 group-hover:opacity-100 transition-opacity"
       @click.stop
     >
       <AddToCaseMenu :document-ids="[document.id]" />

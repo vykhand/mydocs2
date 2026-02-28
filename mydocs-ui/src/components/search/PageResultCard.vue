@@ -16,7 +16,7 @@ const appStore = useAppStore()
 
 const thumbnailUrl = computed(() =>
   props.result.document_id && props.result.page_number
-    ? getPageThumbnailUrl(props.result.document_id, props.result.page_number)
+    ? getPageThumbnailUrl(props.result.document_id, props.result.page_number, 600)
     : ''
 )
 
@@ -45,11 +45,11 @@ function handleClick() {
     @click="handleClick"
   >
     <!-- Thumbnail -->
-    <div class="w-full h-32 overflow-hidden relative" style="background-color: var(--color-bg-tertiary);">
+    <div class="w-full h-48 overflow-hidden relative" style="background-color: var(--color-bg-tertiary);">
       <img
         v-if="thumbnailUrl"
         :src="thumbnailUrl"
-        class="w-full h-full object-cover object-top"
+        class="w-full h-full object-contain object-top"
         loading="lazy"
         @error="($event.target as HTMLImageElement).style.display = 'none'"
       />

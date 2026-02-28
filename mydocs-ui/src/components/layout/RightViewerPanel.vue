@@ -208,6 +208,7 @@ onBeforeUnmount(() => {
           <MarkdownViewer
             v-else-if="appStore.viewerActiveDocumentTab === 'markdown'"
             :content="viewer.document.value.content || ''"
+            :page-count="viewer.totalPages.value"
             @go-to-page="handleGoToPage"
             class="h-full"
           />

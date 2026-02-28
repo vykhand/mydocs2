@@ -244,7 +244,7 @@ async def get_page(document_id: str, page_number: int):
 async def get_page_thumbnail(
     document_id: str,
     page_number: int,
-    width: int = Query(300, ge=16, le=2048),
+    width: int = Query(600, ge=16, le=2048),
 ):
     """Serve a JPEG thumbnail for a specific page of a document.
 
