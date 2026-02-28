@@ -8,7 +8,7 @@ import DocumentViewer from '@/components/viewer/DocumentViewer.vue'
 import MarkdownViewer from '@/components/viewer/MarkdownViewer.vue'
 import HtmlViewer from '@/components/viewer/HtmlViewer.vue'
 import PageImageViewer from '@/components/viewer/PageImageViewer.vue'
-import { X, Maximize2, ChevronLeft, ChevronRight, Info } from 'lucide-vue-next'
+import { X, Maximize2, ChevronLeft, ChevronRight, Info, FileText, ArrowLeft } from 'lucide-vue-next'
 import { ref } from 'vue'
 
 const panelWidth = defineModel<number>('panelWidth', { default: 420 })
@@ -208,7 +208,6 @@ onBeforeUnmount(() => {
           <MarkdownViewer
             v-else-if="appStore.viewerActiveDocumentTab === 'markdown'"
             :content="viewer.document.value.content || ''"
-            :page-count="viewer.totalPages.value"
             @go-to-page="handleGoToPage"
             class="h-full"
           />
@@ -327,16 +326,27 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- Mode indicator -->
-      <span
-        v-if="appStore.viewerMode === 'page'"
-        class="text-xs px-2 py-0.5 rounded cursor-pointer hover:opacity-80"
-        style="background-color: var(--color-bg-tertiary); color: var(--color-accent);"
-        @click="appStore.switchToDocumentMode()"
-        title="Switch to document mode"
+      <!-- Go to Page (document mode) / Back to Document (page mode) -->
+      <button
+        v-if="appStore.viewerMode === 'document'"
+        class="flex items-center gap-1 text-xs px-2 py-1 rounded border hover:opacity-80 transition-opacity"
+        style="border-color: var(--color-border); color: var(--color-accent);"
+        @click="appStore.switchToPageMode(viewer.currentPage.value)"
+        title="View current page details"
       >
-        Page Mode
-      </span>
+        <FileText :size="12" />
+        Go to Page
+      </button>
+      <button
+        v-else
+        class="flex items-center gap-1 text-xs px-2 py-1 rounded border hover:opacity-80 transition-opacity"
+        style="border-color: var(--color-border); color: var(--color-accent);"
+        @click="appStore.switchToDocumentMode()"
+        title="Back to document view"
+      >
+        <ArrowLeft :size="12" />
+        Back to Document
+      </button>
 
       <!-- Search result navigation -->
       <div v-if="hasSearchResults" class="flex items-center gap-2">
