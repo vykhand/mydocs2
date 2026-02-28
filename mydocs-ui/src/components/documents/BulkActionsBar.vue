@@ -2,17 +2,21 @@
 import { ref } from 'vue'
 import { useDocumentsStore } from '@/stores/documents'
 import { useToast } from 'vue-toastification'
-import { batchParse, deleteDocument, addTags } from '@/api/documents'
+import { batchParse, deleteDocument, addTags, parseSingle } from '@/api/documents'
+import { splitClassify } from '@/api/extract'
 import TagInput from '@/components/common/TagInput.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import { Play, Tag, Trash2, X } from 'lucide-vue-next'
+import { Play, Scissors, Tag, Trash2, X } from 'lucide-vue-next'
 import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
 
 const docsStore = useDocumentsStore()
 const toast = useToast()
 const showTagModal = ref(false)
 const showDeleteConfirm = ref(false)
+const showClassifyConfirm = ref(false)
 const bulkTags = ref<string[]>([])
+const classifyProgress = ref('')
+const classifyRunning = ref(false)
 
 async function bulkParse() {
   const ids = Array.from(docsStore.selectedIds)
@@ -46,6 +50,45 @@ async function bulkDelete() {
   docsStore.clearSelection()
   docsStore.fetchDocuments()
 }
+
+function startClassify() {
+  const ids = Array.from(docsStore.selectedIds)
+  const unparsedDocs = docsStore.documents.filter(d => ids.includes(d.id) && d.status !== 'parsed')
+  if (unparsedDocs.length > 0) {
+    showClassifyConfirm.value = true
+  } else {
+    runClassify()
+  }
+}
+
+async function runClassify() {
+  showClassifyConfirm.value = false
+  classifyRunning.value = true
+  const ids = Array.from(docsStore.selectedIds)
+  const allDocs = docsStore.documents.filter(d => ids.includes(d.id))
+  let processed = 0
+
+  try {
+    for (const doc of allDocs) {
+      processed++
+      // Auto-parse if needed
+      if (doc.status !== 'parsed') {
+        classifyProgress.value = `Parsing ${processed}/${allDocs.length}: ${doc.original_file_name}`
+        await parseSingle(doc.id)
+      }
+      classifyProgress.value = `Classifying ${processed}/${allDocs.length}: ${doc.original_file_name}`
+      await splitClassify(doc.id)
+    }
+    toast.success(`Classified ${allDocs.length} document(s)`)
+    docsStore.clearSelection()
+    docsStore.fetchDocuments()
+  } catch {
+    toast.error('Classification failed')
+  } finally {
+    classifyRunning.value = false
+    classifyProgress.value = ''
+  }
+}
 </script>
 
 <template>
@@ -56,17 +99,33 @@ async function bulkDelete() {
     <span class="text-sm font-medium" style="color: var(--color-text-primary);">
       {{ docsStore.selectedIds.size }} selected
     </span>
+
+    <!-- Progress indicator -->
+    <span v-if="classifyProgress" class="text-xs" style="color: var(--color-accent);">
+      {{ classifyProgress }}
+    </span>
+
     <div class="flex items-center gap-2 ml-auto">
       <button
         @click="bulkParse"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
+        :disabled="classifyRunning"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border disabled:opacity-40"
         style="border-color: var(--color-border); color: var(--color-text-primary);"
       >
         <Play :size="14" /> Parse
       </button>
       <button
+        @click="startClassify"
+        :disabled="classifyRunning"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border disabled:opacity-40"
+        style="border-color: var(--color-border); color: var(--color-text-primary);"
+      >
+        <Scissors :size="14" /> Split & Classify
+      </button>
+      <button
         @click="showTagModal = true"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
+        :disabled="classifyRunning"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border disabled:opacity-40"
         style="border-color: var(--color-border); color: var(--color-text-primary);"
       >
         <Tag :size="14" /> Add Tags
@@ -74,7 +133,8 @@ async function bulkDelete() {
       <AddToCaseMenu :document-ids="Array.from(docsStore.selectedIds)" />
       <button
         @click="showDeleteConfirm = true"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium"
+        :disabled="classifyRunning"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40"
         style="color: var(--color-danger);"
       >
         <Trash2 :size="14" /> Delete
@@ -103,6 +163,16 @@ async function bulkDelete() {
       </div>
     </div>
   </Teleport>
+
+  <!-- Classify confirm (needs parsing first) -->
+  <ConfirmDialog
+    v-if="showClassifyConfirm"
+    title="Parse & Classify"
+    message="Some selected documents need parsing first. Parse and classify all selected documents?"
+    confirm-label="Parse & Classify"
+    @confirm="runClassify"
+    @cancel="showClassifyConfirm = false"
+  />
 
   <ConfirmDialog
     v-if="showDeleteConfirm"

@@ -1,5 +1,5 @@
 import { ref, onMounted, watch, isRef, type Ref } from 'vue'
-import { getDocument, getPages, getDocumentFileUrl } from '@/api/documents'
+import { getDocument, getPages, getPage, getDocumentFileUrl } from '@/api/documents'
 import type { Document, DocumentPage } from '@/types'
 
 export function useDocumentViewer(documentId: string | Ref<string | null>, initialPage = 1) {
@@ -9,7 +9,7 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
   const totalPages = ref(0)
   const zoom = ref(1.0)
   const loading = ref(true)
-  const pdfDoc = ref<any>(null)
+  const currentPageData = ref<DocumentPage | null>(null)
 
   const resolveId = () => isRef(documentId) ? documentId.value : documentId
   const fileUrl = ref(resolveId() ? getDocumentFileUrl(resolveId()!) : '')
@@ -25,6 +25,16 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
       totalPages.value = document.value.file_metadata?.page_count || pages.value.length || 1
     } finally {
       loading.value = false
+    }
+  }
+
+  async function loadPageData(pageNumber: number) {
+    const id = resolveId()
+    if (!id) return
+    try {
+      currentPageData.value = await getPage(id, pageNumber)
+    } catch {
+      currentPageData.value = null
     }
   }
 
@@ -59,6 +69,7 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
     watch(documentId, (newId) => {
       if (newId) {
         currentPage.value = 1
+        currentPageData.value = null
         loadDocument()
       }
     })
@@ -73,7 +84,7 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
     totalPages,
     zoom,
     loading,
-    pdfDoc,
+    currentPageData,
     fileUrl,
     goToPage,
     nextPage,
@@ -81,5 +92,6 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
     setZoom,
     fitToWidth,
     fitToPage,
+    loadPageData,
   }
 }

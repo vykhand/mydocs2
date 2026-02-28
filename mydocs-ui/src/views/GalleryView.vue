@@ -1,28 +1,24 @@
 <script setup lang="ts">
-import { computed, watch, onMounted, watchEffect } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useDocumentsStore } from '@/stores/documents'
+import { useSearchStore } from '@/stores/search'
 import GalleryToolbar from '@/components/gallery/GalleryToolbar.vue'
 import DocumentGrid from '@/components/gallery/DocumentGrid.vue'
-import SearchResultsList from '@/components/gallery/SearchResultsList.vue'
+import PageResultsGrid from '@/components/search/PageResultsGrid.vue'
 import UploadModal from '@/components/gallery/UploadModal.vue'
 import SettingsDrawer from '@/components/gallery/SettingsDrawer.vue'
 import BulkActionsBar from '@/components/documents/BulkActionsBar.vue'
 import PaginationBar from '@/components/common/PaginationBar.vue'
 import LoadingSkeleton from '@/components/common/LoadingSkeleton.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import { search as searchApi } from '@/api/search'
-import type { SearchResponse } from '@/types'
-import { ref } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const docsStore = useDocumentsStore()
-
-const searchResults = ref<SearchResponse | null>(null)
-const searchLoading = ref(false)
+const searchStore = useSearchStore()
 
 const hasSearchQuery = computed(() => !!route.query.q)
 const showUploadModal = computed(() => route.meta.modal === 'upload')
@@ -42,32 +38,22 @@ function syncUrlToStore() {
   docsStore.filters.date_to = (q.date_to as string) || undefined
 }
 
-// When there's a search query, run page-level hybrid search
+// When there's a search query, use the search store
 async function runSearch() {
   const query = route.query.q as string
   if (!query) {
-    searchResults.value = null
+    searchStore.reset()
     return
   }
-  searchLoading.value = true
-  try {
-    searchResults.value = await searchApi({
-      query,
-      search_target: 'pages',
-      search_mode: 'hybrid',
-      filters: {
-        status: docsStore.filters.status || undefined,
-        file_type: docsStore.filters.file_type || undefined,
-        tags: docsStore.filters.tags ? docsStore.filters.tags.split(',') : undefined,
-        document_type: docsStore.filters.document_type || undefined,
-      },
-      top_k: 20,
-    })
-  } catch {
-    searchResults.value = null
-  } finally {
-    searchLoading.value = false
+  searchStore.query = query
+  // Pass sidebar filters to search
+  searchStore.config.filters = {
+    status: docsStore.filters.status || undefined,
+    file_type: docsStore.filters.file_type || undefined,
+    tags: docsStore.filters.tags ? docsStore.filters.tags.split(',') : undefined,
+    document_type: docsStore.filters.document_type || undefined,
   }
+  await searchStore.executeSearch()
 }
 
 // Watch for route changes
@@ -76,19 +62,19 @@ watch(() => route.query, () => {
   if (hasSearchQuery.value) {
     runSearch()
   } else {
-    searchResults.value = null
+    searchStore.reset()
     docsStore.fetchDocuments()
   }
 }, { deep: true })
 
 // Set search context on store when opening viewer from search results
 watch(() => appStore.viewerDocumentId, (newId) => {
-  if (newId && searchResults.value?.results?.length) {
+  if (newId && searchStore.response?.results?.length) {
     const query = (route.query.q as string) || ''
-    const idx = searchResults.value.results.findIndex(
+    const idx = searchStore.response.results.findIndex(
       r => r.document_id === newId && r.page_number === appStore.viewerPage
     )
-    appStore.setViewerSearchContext(searchResults.value.results, query, Math.max(0, idx))
+    appStore.setViewerSearchContext(searchStore.response.results, query, Math.max(0, idx))
   }
 })
 
@@ -104,17 +90,17 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4">
-    <GalleryToolbar :result-count="hasSearchQuery ? (searchResults?.total || 0) : docsStore.total" />
+    <GalleryToolbar :result-count="hasSearchQuery ? (searchStore.response?.total || 0) : docsStore.total" />
 
     <!-- Bulk actions -->
     <BulkActionsBar v-if="docsStore.selectedIds.size > 0" />
 
     <!-- Search results mode -->
     <template v-if="hasSearchQuery">
-      <LoadingSkeleton v-if="searchLoading" />
-      <SearchResultsList
-        v-else-if="searchResults && searchResults.results.length"
-        :results="searchResults.results"
+      <LoadingSkeleton v-if="searchStore.loading" />
+      <PageResultsGrid
+        v-else-if="searchStore.response && searchStore.response.results.length"
+        :results="searchStore.response.results"
       />
       <EmptyState
         v-else

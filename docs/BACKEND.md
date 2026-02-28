@@ -311,6 +311,34 @@ GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/1
 
 ---
 
+#### `GET /api/v1/documents/{document_id}/pages/{page_number}/thumbnail`
+
+Get a JPEG thumbnail of a specific page. Useful for document previews in the UI.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `width` | int | `300` | Thumbnail width in pixels (16–2048) |
+
+```http
+GET http://localhost:8000/api/v1/documents/{{document_id}}/pages/1/thumbnail?width=300
+```
+
+**Response** `200`: Binary JPEG image (`Content-Type: image/jpeg`).
+
+**Response** `307`: Redirect to Azure Blob SAS URL (same pattern as `/file` endpoint — when storage backend is Azure Blob, returns a `307 Temporary Redirect` with a time-limited SAS URL instead of streaming the bytes through the API server).
+
+**Headers**: `Cache-Control: max-age=3600`
+
+**Errors**: `404 DOCUMENT_NOT_FOUND`, `400 INVALID_REQUEST` (unsupported file type)
+
+**Implementation notes**:
+- Uses `pymupdf` (`fitz`) for PDF page rasterization and image resizing (lazy import to avoid loading pymupdf for non-thumbnail routes)
+- Thumbnails cached in storage backend using naming convention `{doc_id}.p{N}.thumb.jpg` (local: `data/managed/`, Azure: `az://managed/`)
+- Cache check via `storage.list_files(prefix=...)` before generation — if a cached thumbnail exists, it is served directly
+- Same SAS redirect pattern as the `/file` endpoint for Azure Blob storage
+
+---
+
 #### `POST /api/v1/documents/{document_id}/tags`
 
 Add tags to a document (uses `$addToSet`; no duplicates).

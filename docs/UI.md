@@ -5,7 +5,7 @@
 | Package | `mydocs-ui`          |
 | Version | 1.0.0                |
 | Spec    | `docs/specs/UI.md` v2.0 |
-| Date    | 2026-02-24           |
+| Date    | 2026-02-28           |
 
 > This document captures the **actual implemented state** of the UI codebase, compared against the specification in `docs/specs/UI.md`. Deviations from the spec are marked with **[DEVIATION]**. Missing features are marked with **[NOT IMPLEMENTED]**.
 
@@ -22,7 +22,8 @@
 | HTTP           | Axios                         | Axios 1.7.9                   | Match |
 | Routing        | Vue Router 4                  | Vue Router 4.5.0              | Match |
 | Icons          | Lucide Vue Next               | lucide-vue-next 0.469.0       | Match |
-| PDF Viewer     | PDF.js (`pdfjs-dist`)         | pdfjs-dist 4.9.155            | Match |
+| PDF Viewer     | `@tato30/vue-pdf`             | @tato30/vue-pdf (Vue 3 wrapper for PDF.js) | Match |
+| Markdown       | `markdown-it`                 | markdown-it (rendering markdown/HTML in viewer tabs) | Match |
 | Date Picker    | `@vuepic/vue-datepicker`      | @vuepic/vue-datepicker 12.1.0 | Match |
 | Notifications  | Vue Toastification            | vue-toastification 2.0.0-rc.5 | Match |
 | Auth           | `@azure/msal-browser`         | @azure/msal-browser 4.8.0     | Match |
@@ -39,17 +40,23 @@ The directory structure broadly matches the spec. Below are deviations:
 
 #### Files present in spec but functioning differently in code
 
-| File (spec) | Spec Says | Actual | Deviation |
-|---|---|---|---|
-| `views/UploadView.vue` | "(legacy, redirects to /upload modal)" | Full standalone upload page with drop zone, file queue, progress, storage mode, parse-after-upload, server-path ingestion | **[DEVIATION]** Not a redirect; full legacy page exists but is unused by the router |
-| `views/DocumentsView.vue` | "(legacy, redirects to /)" | Full standalone documents list page with table, filters, pagination, bulk actions | **[DEVIATION]** Not a redirect; full legacy page exists but is unused by the router |
-| `views/DocumentDetailView.vue` | "(legacy, redirects to /doc/:id)" | Full standalone document detail page with metadata, pages, elements, tags, parse config, JSON viewer | **[DEVIATION]** Not a redirect; full legacy page exists but is unused by the router |
-| `views/SearchView.vue` | "(legacy, redirects to /?q=)" | Full standalone search page with bar, filters, advanced panel, results | **[DEVIATION]** Not a redirect; full legacy page exists but is unused by the router |
-| `views/CasesView.vue` | "(legacy, redirects to /cases)" | "Coming Soon" placeholder with EmptyState | **[DEVIATION]** Not a redirect; shows placeholder message |
-| `views/SettingsView.vue` | "(legacy, redirects to /settings drawer)" | Full standalone settings page with theme, search defaults, parser defaults, connection info, about | **[DEVIATION]** Not a redirect; full legacy page exists but is unused by the router |
-| `views/DocumentViewerView.vue` | "(legacy, redirects to /doc/:id)" | Full standalone document viewer page with toolbar, PDF viewer, page navigation | **[DEVIATION]** Not a redirect; full legacy page exists but is unused by the router |
+All seven legacy views have been **deleted** as part of the UI redesign:
+- `UploadView.vue`, `DocumentsView.vue`, `DocumentDetailView.vue`, `SearchView.vue`, `CasesView.vue`, `SettingsView.vue`, `DocumentViewerView.vue`
 
-> **Impact:** The seven legacy views are dead code — they exist as full implementations but the router never loads them. They represent the pre-gallery-architecture UI and should either be deleted or converted to actual redirects per the spec.
+The old `PdfViewer.vue` (raw PDF.js canvas) has been replaced by `VuePdfViewer.vue` (@tato30/vue-pdf wrapper).
+
+#### New files added
+
+| File | Purpose |
+|---|---|
+| `components/viewer/VuePdfViewer.vue` | @tato30/vue-pdf PDF viewer with annotation overlay layer |
+| `components/viewer/MarkdownViewer.vue` | Markdown rendered/raw viewer |
+| `components/viewer/HtmlViewer.vue` | HTML rendered/raw viewer |
+| `components/viewer/PageImageViewer.vue` | Page image viewer with zoom |
+| `components/search/PageResultCard.vue` | Page search result card with thumbnail |
+| `components/search/PageResultsGrid.vue` | Grid/list container for page search results |
+| `composables/useMarkdownRenderer.ts` | markdown-it wrapper |
+| `utils/format.ts` | formatFileSize, getDisplayStatus utilities |
 
 #### File count comparison
 
@@ -114,7 +121,7 @@ The directory structure broadly matches the spec. Below are deviations:
 
 Implemented as specified:
 - Top Bar: fixed, with sidebar toggle, logo, search bar, action buttons
-- Sidebar: collapsible, with Documents/Cases tabs and filter sections
+- Sidebar: collapsible, search-option focused (no Documents/Cases tabs), with filter sections and advanced search settings
 - Main Content Area: scrollable, renders active route
 - Right Viewer Panel: resizable side panel for document viewer
 - Mobile Tab Bar: bottom navigation with Documents, Cases, More
@@ -161,12 +168,12 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 |---|---|---|---|
 | Unified gallery: no `?q=` shows documents, with `?q=` shows search | Dual mode based on URL | Implemented: syncs URL params, switches between DocumentGrid and SearchResultsList | Match |
 | Gallery Toolbar: result count + view toggle | Required | GalleryToolbar with count and grid/list toggle | Match |
-| Document grid/list | DocumentGrid renders cards (grid) or rows (list) | DocumentGrid switches between card grid and DocumentTable list view | Match |
-| Sidebar filters | Collapsible status, file type, doc type, sort, advanced (tags, date range) | SidebarNav with all filter sections | Match |
+| Document grid/list | DocumentGrid renders cards with thumbnails, page count, sub-doc count, file size, derived status | DocumentGrid switches between card grid and DocumentTable list view. Cards show first-page thumbnail, metadata stats, and derived status (New/Parsing/Parsed/Classified/Failed). | Match |
+| Sidebar filters | Search-option focused. No tabs. Status, file type, doc type, tags, date range, sorting, advanced search settings. | SidebarNav with all filter sections plus advanced search mode/config. Cases link moved to TopBar. | Match |
 | Active filter chips | Colored pills, click to remove | Implemented in SidebarNav | Match |
 | Pagination | Page size selector (25, 50, 100) + page navigation | PaginationBar component | Match |
-| Bulk actions bar | Appears on selection: Parse, Add Tags, Remove Tags, Assign to Case, Delete | BulkActionsBar with parse, tag, delete, add-to-case | Match |
-| Search results list | Cards with file name, page number, score, snippet, highlights | SearchResultsList + SearchResultCard | Match |
+| Bulk actions bar | Appears on selection: Parse, Split & Classify, Add Tags, Assign to Case, Delete | BulkActionsBar with parse, split & classify (auto-parses unparsed docs), tag, delete, add-to-case | Match |
+| Search results | Page cards with thumbnails and snippets (grid mode), detailed result cards (list mode) | PageResultsGrid switches between PageResultCard grid and SearchResultCard list | Match |
 | Search debounce | 300ms in Top Bar | Debounced search input in TopBar | Match |
 | Filter sync to URL | `router.replace()` for bookmarkable views | Implemented via URL query param sync | Match |
 | **Filter sections collapsed by default** | Status, File Type start collapsed | **Need to verify default collapsed state** | Likely Match |
@@ -182,30 +189,46 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 | Result controls | top_k, min_score, include_content_fields | top_k and min_score present | Match |
 | Score breakdown | Per-result fulltext + vector + combined scores | ScoreBreakdown component | Match |
 
-### 5.3 Document Viewer (Right Panel)
+### 5.3 Document Viewer (Right Panel — Dual Mode)
+
+The viewer now operates in two modes:
+- **Document mode** — opened from document cards. Has PDF and Markdown tabs.
+- **Page mode** — opened from search results. Has Page View, HTML, and Markdown tabs.
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
 | Resizable side panel | 300px – 75% viewport, default 420px | RightViewerPanel with mouse-drag resize | Match |
 | Panel header | Doc name + Info, Maximize, Close buttons | Header with doc name, info toggle, close | Match |
-| PDF Viewer (full height) | Canvas + text layer fills between header and toolbar | PdfViewer with canvas rendering + text layer | Match |
-| Info panel slide-over | Toggled by info button; metadata, tags, duplicates, advanced | Slide-over panel with metadata, tags, duplicates (static "none detected"), advanced (ID, parser) | Match |
-| Bottom toolbar | Page nav (Prev/Next + "Page N/Total") + search result nav ("Result X of Y") | Implemented with both page nav and search result navigation | Match |
+| Tab bar | Document mode: PDF + Markdown; Page mode: Page View + HTML + Markdown | Tab bar below header, switches based on viewerMode | Match |
+| Tab content | Routes to appropriate viewer component | VuePdfViewer, MarkdownViewer, HtmlViewer, PageImageViewer | Match |
+| Info panel slide-over | Toggled by info button; metadata, tags, duplicates, advanced | Slide-over panel with metadata, tags, duplicates, advanced | Match |
+| Bottom toolbar | Page nav + mode indicator + search result nav | Implemented with page mode badge (click to switch back to document mode) | Match |
 | Tablet/mobile: full-screen overlay | Fixed position, z-50 | Responsive behavior implemented | Match |
 
-#### PDF Viewer Details
+#### Document Mode — PDF Tab (VuePdfViewer)
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
-| Page canvas | High-res PDF.js canvas | Canvas rendering with devicePixelRatio scaling | Match |
-| Text layer | Transparent overlay for selection + highlight | PDF.js TextLayer API used | Match |
-| Page navigation | Prev/Next, page input, total count, arrow keys | Implemented | Match |
-| Zoom controls | Zoom in/out, fit-to-width, fit-to-page | ViewerToolbar has zoom controls | Match |
-| **Pinch-to-zoom** | On touch devices | **Not implemented** | **[NOT IMPLEMENTED]** |
-| **Thumbnail sidebar** | Vertical strip of page thumbnails, click to jump | **Page number buttons only — no actual rendered thumbnails** | **[DEVIATION]** Renders numbers, not thumbnail images |
-| Highlight overlay | Mark elements on text layer spans for query matches | Implemented: `applyHighlights()` walks text spans, wraps matches in `<mark>` elements | Match |
-| Search result nav | "Result X of Y" with Prev/Next across pages/documents | Implemented in bottom toolbar | Match |
-| **Element annotations** | Tooltip on hover/click showing element type, short_id, text | **Not implemented** | **[NOT IMPLEMENTED]** |
+| Vue PDF component | @tato30/vue-pdf `<VuePDF>` with text-layer and annotation-layer | Implemented with text-layer and annotation-layer props | Match |
+| Search highlighting | Built-in highlight-text prop | Uses highlight-text prop | Match |
+| Annotation overlay | Positioned div for future extraction annotations | `data-annotation-overlay` div with `position: absolute; inset: 0; pointer-events: none` | Match |
+| Page navigation | Prev/Next, page input, total count | Implemented in bottom toolbar | Match |
+
+#### Document Mode — Markdown Tab
+
+| Element | Spec | Actual | Status |
+|---|---|---|---|
+| Rendered markdown | document.content rendered via markdown-it | MarkdownViewer with useMarkdownRenderer composable | Match |
+| Raw toggle | Toggle between rendered and raw views | Implemented | Match |
+| Go to page links | Links switch to page mode | Emits goToPage event, switches viewer to page mode | Match |
+
+#### Page Mode Tabs
+
+| Element | Spec | Actual | Status |
+|---|---|---|---|
+| Page View tab | High-res page image from thumbnail endpoint with zoom | PageImageViewer using getPageThumbnailUrl(width=1200) | Match |
+| HTML tab | page.content_html with rendered/raw toggle | HtmlViewer component | Match |
+| Markdown tab | page.content_markdown with rendered/raw toggle | MarkdownViewer component | Match |
 
 #### Image Viewer Details
 
@@ -296,6 +319,11 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 | viewerHighlightQuery | string | string | Match |
 | viewerSearchResults | SearchResult[] | SearchResult[] | Match |
 | viewerCurrentResultIndex | number | number | Match |
+| viewerMode | `'document' \| 'page'` | `ViewerMode` type | Match |
+| viewerActiveDocumentTab | `'pdf' \| 'markdown'` | `DocumentViewerTab` type | Match |
+| viewerActivePageTab | `'page-view' \| 'html' \| 'markdown'` | `PageViewerTab` type | Match |
+
+Additional methods: `switchToPageMode(page)`, `switchToDocumentMode()`.
 
 Persistence: `['mode', 'theme', 'sidebarCollapsed', 'activeTab', 'galleryViewMode']` — covers all spec requirements.
 
@@ -372,7 +400,7 @@ Persisted with `persist: true` — **matches spec**.
 | totalPages | `Ref<number>` | `Ref<number>` | Match |
 | zoom | `Ref<number>` | `Ref<number>` | Match |
 | loading | `Ref<boolean>` | `Ref<boolean>` | Match |
-| pdfDoc | `Ref<any>` | `Ref<any>` | Match |
+| currentPageData | `Ref<DocumentPage \| null>` | `Ref<DocumentPage \| null>` | Match |
 | fileUrl | `Ref<string>` | `Ref<string>` | Match |
 | goToPage(n) | void | void | Match |
 | nextPage() | void | void | Match |
@@ -380,8 +408,15 @@ Persisted with `persist: true` — **matches spec**.
 | setZoom(level) | void | void | Match |
 | fitToWidth() | void | void | Match |
 | fitToPage() | void | void | Match |
+| loadPageData(n) | `Promise<void>` | `Promise<void>` | Match |
 
 Accepts both string and `Ref<string | null>` for documentId — **matches spec**.
+
+### 7.6 `useMarkdownRenderer()`
+
+| Member | Spec | Actual | Match |
+|---|---|---|---|
+| render(markdown) | Returns HTML string | Uses markdown-it to render | Match |
 
 ### 7.3 `useHighlights(elements, pageNumber, searchContent?)`
 
@@ -422,10 +457,10 @@ Registers `Cmd+K`, `/`, `Escape` — **matches spec exactly**.
 
 | Module | Functions | Matches Spec |
 |---|---|---|
-| documents.ts | listDocuments, getDocument, uploadAndIngest, ingestFromPath, batchParse, parseSingle, getPages, getPage, addTags, removeTag, deleteDocument, getDocumentFileUrl | Match |
+| documents.ts | listDocuments, getDocument, uploadAndIngest, ingestFromPath, batchParse, parseSingle, getPages, getPage, addTags, removeTag, deleteDocument, getDocumentFileUrl, getPageThumbnailUrl | Match |
 | search.ts | search, getIndices | Match |
 | cases.ts | listCases, getCase, createCase, updateCase, deleteCase, addDocumentsToCase, removeDocumentFromCase, getCaseDocuments (8 functions) | Match |
-| extract.ts | extractFields, getFieldResults | Match |
+| extract.ts | extractFields, getFieldResults, splitClassify | Match |
 | health.ts | checkHealth | Match |
 
 ---
@@ -492,8 +527,8 @@ Fonts loaded via Google Fonts in `index.html`:
 | **Virtual scrolling** | Lists > 100 items | **Not implemented** | **[NOT IMPLEMENTED]** |
 | Debounced search | 300ms debounce | Implemented in TopBar | Match |
 | PDF page caching | LRU max 10 pages | **Not implemented; renders single current page** | **[NOT IMPLEMENTED]** |
-| **Image thumbnails** | Server-generated thumbnails with lazy loading | **Not implemented** | **[NOT IMPLEMENTED]** |
-| Bundle size | PDF.js worker as separate chunk; Tailwind purge | PDF.js worker loaded; Tailwind v4 auto-purges | Match |
+| Page thumbnails | Server-generated thumbnails with lazy loading | Implemented via `GET /api/v1/documents/{id}/pages/{num}/thumbnail?width=300` with storage caching | Match |
+| Bundle size | PDF.js worker as separate chunk; Tailwind purge | @tato30/vue-pdf handles worker; Tailwind v4 auto-purges | Match |
 | URL-driven state | Filters synced to URL params | Implemented | Match |
 
 ---
@@ -506,32 +541,21 @@ Fonts loaded via Google Fonts in `index.html`:
 |---|---|---|---|
 | D1 | Settings Drawer | Missing: default search mode, default top_k, parser defaults, connection info. Only has theme, mode, and about. | 3.6 |
 | D2 | Upload Modal | Missing: storage mode selector, recursive toggle, parse-after-upload toggle, server-path ingestion. All hardcoded to defaults. | 3.1 |
-| D3 | Thumbnail Sidebar | Renders page numbers instead of actual PDF page thumbnail images. | 3.3 |
-| D4 | Tag Editing in Viewer | Tags displayed as read-only badges in the info panel, not as editable TagInput. | 3.4 |
+| D3 | Tag Editing in Viewer | Tags displayed as read-only badges in the info panel, not as editable TagInput. | 3.4 |
 
 ### Missing Features
 
 | # | Area | Description | Spec Section |
 |---|---|---|---|
 | M1 | Pinch-to-zoom | Touch device pinch-to-zoom for PDF viewer not implemented. | 3.3 |
-| M2 | Element annotations | Hover/click tooltips showing element type, short_id, extracted text not implemented. | 3.3 |
+| M2 | Element annotations | Annotation overlay layer exists in VuePdfViewer (positioned div), but no annotation rendering yet. | 3.3 |
 | M3 | Image highlight overlay | Bounding-box highlights for image documents not implemented. | 3.3 |
 | M4 | Virtual scrolling | No virtual scrolling for long document or search result lists. | 10 |
-| M5 | PDF page caching | No LRU cache for decoded PDF pages. | 10 |
-| M6 | Image thumbnails | No server-generated thumbnails for document grid. | 10 |
-| M7 | Lazy route loading | Routes use direct imports instead of lazy-loaded dynamic imports. | 5 / 10 |
+| M5 | Lazy route loading | Routes use direct imports instead of lazy-loaded dynamic imports. | 5 / 10 |
 
 ### Dead Code
 
-| # | File | Description |
-|---|---|---|
-| DC1 | `views/UploadView.vue` | Full standalone upload page; unused by router. |
-| DC2 | `views/DocumentsView.vue` | Full standalone documents page; unused by router. |
-| DC3 | `views/DocumentDetailView.vue` | Full standalone document detail page; unused by router. |
-| DC4 | `views/SearchView.vue` | Full standalone search page; unused by router. |
-| DC5 | `views/CasesView.vue` | "Coming Soon" placeholder; unused by router. |
-| DC6 | `views/SettingsView.vue` | Full standalone settings page; unused by router. |
-| DC7 | `views/DocumentViewerView.vue` | Full standalone viewer page; unused by router. |
+All legacy views have been deleted. No dead code remains in the views directory.
 
 ---
 
@@ -653,13 +677,18 @@ These user stories reflect what is **actually working** in the current codebase,
 - The unified gallery architecture (single GalleryView as hub) is implemented and functional.
 - Modal/drawer overlay pattern for Upload and Settings works correctly via route meta.
 - Responsive breakpoints cover all four tiers (mobile, tablet, desktop, wide).
-- PDF viewing with text layer highlighting is robust.
-- Search result navigation through the viewer is smooth.
+- Dual-mode viewer (document + page) with tabbed content provides rich document exploration.
+- PDF viewing via @tato30/vue-pdf with built-in text layer, annotation layer, and search highlighting.
+- Annotation overlay layer in VuePdfViewer provides foundation for future extraction annotations.
+- Page thumbnails served from backend with storage caching improve gallery card visual quality.
+- Search-centric sidebar with full retriever parameter control enables power-user workflows.
+- Search results displayed as page gallery cards with thumbnails.
+- Split & Classify bulk action with auto-parse support.
 - State management with Pinia is clean and well-organized.
 - Authentication flow with MSAL is complete.
 
 ### What Needs Attention
-1. **Dead legacy views** — Seven full-page views exist but are unreachable. They contain features (like full settings, standalone upload) that the modal/drawer equivalents lack.
-2. **Feature parity gap** — The UploadModal and SettingsDrawer are simpler than their legacy view counterparts. Either the drawers need to be enhanced or the feature requirements relaxed in the spec.
-3. **Performance features** — Virtual scrolling, lazy route loading, and PDF page caching are specified but not implemented. These will matter as document collections grow.
-4. **Tag editing in viewer** — Tags are displayed read-only in the info panel. Users must leave the viewer context to manage tags.
+1. **Feature parity gap** — The UploadModal and SettingsDrawer are simpler than the legacy views were. Need to add storage mode, parse-after-upload, and search defaults.
+2. **Performance features** — Virtual scrolling and lazy route loading are specified but not implemented.
+3. **Tag editing in viewer** — Tags are displayed read-only in the info panel. Users must leave the viewer context to manage tags.
+4. **Annotation rendering** — The overlay layer exists in VuePdfViewer but does not yet render annotation boxes from extraction results.

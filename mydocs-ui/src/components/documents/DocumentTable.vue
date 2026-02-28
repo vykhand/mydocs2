@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useDocumentsStore } from '@/stores/documents'
-import StatusBadge from '@/components/common/StatusBadge.vue'
 import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
-import { Eye, Play, Trash2, Briefcase } from 'lucide-vue-next'
+import { Eye, Play, Trash2 } from 'lucide-vue-next'
 import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
-import { deleteDocument, parseSingle } from '@/api/documents'
+import { deleteDocument, parseSingle, getPageThumbnailUrl } from '@/api/documents'
+import { formatFileSize, getDisplayStatus } from '@/utils/format'
 import { useToast } from 'vue-toastification'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const router = useRouter()
@@ -47,6 +47,14 @@ function toggleAll() {
     docsStore.selectAll()
   }
 }
+
+const statusBadgeColors: Record<string, { bg: string; text: string }> = {
+  gray: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-secondary)' },
+  amber: { bg: '#FEF3C7', text: 'var(--color-warning)' },
+  green: { bg: '#DCFCE7', text: 'var(--color-success)' },
+  blue: { bg: '#DBEAFE', text: '#2563EB' },
+  red: { bg: '#FEE2E2', text: 'var(--color-danger)' },
+}
 </script>
 
 <template>
@@ -57,11 +65,14 @@ function toggleAll() {
           <th class="w-10 px-3 py-3">
             <input type="checkbox" :checked="allSelected()" @change="toggleAll" class="rounded" />
           </th>
+          <th class="w-10 px-1 py-3" />
           <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Name</th>
           <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Type</th>
           <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Status</th>
           <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Tags</th>
           <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Pages</th>
+          <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Sub-docs</th>
+          <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Size</th>
           <th class="text-left px-3 py-3 font-medium" style="color: var(--color-text-secondary);">Created</th>
           <th class="w-24 px-3 py-3" />
         </tr>
@@ -82,11 +93,29 @@ function toggleAll() {
               class="rounded"
             />
           </td>
+          <td class="px-1 py-1">
+            <img
+              :src="getPageThumbnailUrl(doc.id, 1, 60)"
+              class="w-8 h-10 rounded object-cover"
+              loading="lazy"
+              @error="($event.target as HTMLImageElement).style.display = 'none'"
+            />
+          </td>
           <td class="px-3 py-3 font-medium" style="color: var(--color-text-primary);">
             {{ doc.original_file_name }}
           </td>
           <td class="px-3 py-3"><FileTypeBadge :file-type="doc.file_type" /></td>
-          <td class="px-3 py-3"><StatusBadge :status="doc.status" /></td>
+          <td class="px-3 py-3">
+            <span
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+              :style="{
+                backgroundColor: (statusBadgeColors[getDisplayStatus(doc).color] || statusBadgeColors.gray).bg,
+                color: (statusBadgeColors[getDisplayStatus(doc).color] || statusBadgeColors.gray).text,
+              }"
+            >
+              {{ getDisplayStatus(doc).label }}
+            </span>
+          </td>
           <td class="px-3 py-3">
             <div class="flex flex-wrap gap-1">
               <span
@@ -108,6 +137,12 @@ function toggleAll() {
           </td>
           <td class="px-3 py-3" style="color: var(--color-text-secondary);">
             {{ doc.file_metadata?.page_count ?? '-' }}
+          </td>
+          <td class="px-3 py-3" style="color: var(--color-text-secondary);">
+            {{ doc.subdocuments?.length ?? '-' }}
+          </td>
+          <td class="px-3 py-3" style="color: var(--color-text-secondary);">
+            {{ formatFileSize(doc.file_metadata?.size_bytes) }}
           </td>
           <td class="px-3 py-3" style="color: var(--color-text-secondary);">
             {{ formatDate(doc.created_at) }}

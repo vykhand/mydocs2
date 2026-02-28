@@ -240,6 +240,115 @@ async def get_page(document_id: str, page_number: int):
     return page.model_dump(by_alias=False, exclude_none=True)
 
 
+@router.get("/{document_id}/pages/{page_number}/thumbnail")
+async def get_page_thumbnail(
+    document_id: str,
+    page_number: int,
+    width: int = Query(300, ge=16, le=2048),
+):
+    """Serve a JPEG thumbnail for a specific page of a document.
+
+    If a cached thumbnail exists in storage, it is served directly.
+    Otherwise the page is rasterized (PDF via pymupdf, images served as-is
+    or resized), cached to storage, then served.
+    """
+    import fitz  # pymupdf
+
+    # 1. Look up document
+    doc = await Document.aget(document_id)
+    if not doc:
+        return _error(404, "DOCUMENT_NOT_FOUND", f"Document {document_id} not found")
+
+    storage = get_storage(doc.storage_backend)
+    thumb_file_name = f"{document_id}.p{page_number}.thumb.jpg"
+
+    # 2. Check for cached thumbnail
+    cached_files = await storage.list_files(prefix=f"{document_id}.p{page_number}.thumb")
+    cached = next((f for f in cached_files if f["name"] == thumb_file_name), None)
+
+    if cached:
+        # Serve cached thumbnail
+        if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
+            sas_url = await storage.generate_download_url(cached["path"])
+            if sas_url:
+                return RedirectResponse(
+                    url=sas_url,
+                    status_code=307,
+                    headers={"Cache-Control": "max-age=3600"},
+                )
+            return _error(500, "SAS_GENERATION_FAILED", "Failed to generate thumbnail download URL")
+        else:
+            return FileResponse(
+                path=cached["path"],
+                media_type="image/jpeg",
+                headers={"Cache-Control": "max-age=3600"},
+            )
+
+    # 3. Generate thumbnail
+    file_path = doc.managed_path or doc.original_path
+    if not file_path:
+        return _error(404, "FILE_NOT_FOUND", f"File not found for document {document_id}")
+
+    IMAGE_TYPES = {"jpeg", "png", "bmp", "tiff"}
+
+    try:
+        if doc.file_type in IMAGE_TYPES:
+            # For images: open as a single-page fitz document so we can
+            # use the same get_pixmap zoom logic as PDFs.
+            raw_bytes = await storage.get_file_bytes(file_path)
+            img_doc = fitz.open(stream=raw_bytes, filetype=doc.file_type)
+            img_page = img_doc[0]
+            zoom = width / img_page.rect.width if img_page.rect.width > width else 1.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = img_page.get_pixmap(matrix=mat)
+            thumb_bytes = pix.tobytes("jpeg")
+            img_doc.close()
+
+        elif doc.file_type == "pdf":
+            # For PDFs: rasterize the specific page
+            raw_bytes = await storage.get_file_bytes(file_path)
+            pdf_doc = fitz.open(stream=raw_bytes, filetype="pdf")
+            # page_number is 1-based; pymupdf uses 0-based indexing
+            if page_number < 1 or page_number > len(pdf_doc):
+                pdf_doc.close()
+                return _error(404, "PAGE_NOT_FOUND", f"Page {page_number} not found (document has {len(pdf_doc)} pages)")
+            page = pdf_doc[page_number - 1]
+            # Calculate zoom factor to achieve the requested width
+            zoom = width / page.rect.width
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            thumb_bytes = pix.tobytes("jpeg")
+            pdf_doc.close()
+        else:
+            return _error(
+                400,
+                "UNSUPPORTED_FILE_TYPE",
+                f"Thumbnails are not supported for file type '{doc.file_type}'",
+            )
+    except Exception as e:
+        return _error(500, "THUMBNAIL_GENERATION_FAILED", f"Failed to generate thumbnail: {e}")
+
+    # 4. Cache the thumbnail to storage
+    thumb_path = await storage.write_managed_bytes(document_id, thumb_file_name, thumb_bytes)
+
+    # 5. Serve the generated thumbnail
+    if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
+        sas_url = await storage.generate_download_url(thumb_path)
+        if sas_url:
+            return RedirectResponse(
+                url=sas_url,
+                status_code=307,
+                headers={"Cache-Control": "max-age=3600"},
+            )
+        return _error(500, "SAS_GENERATION_FAILED", "Failed to generate thumbnail download URL")
+    else:
+        return FileResponse(
+            path=thumb_path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "max-age=3600"},
+        )
+
+
 @router.post("/{document_id}/tags")
 async def add_tags(document_id: str, request: TagsRequest):
     doc = await Document.aget(document_id)

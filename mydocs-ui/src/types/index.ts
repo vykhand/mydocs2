@@ -52,6 +52,7 @@ export interface Document {
   parser_engine?: string
   parser_config_hash?: string
   elements?: DocumentElement[]
+  subdocuments?: SubDocument[]
   tags: string[]
   created_at?: string
   modified_at?: string
@@ -247,6 +248,37 @@ export interface ExtractionResponse {
   model_used: string
   reference_granularity: string
 }
+
+// Sub-documents (from split & classify)
+export interface SubDocumentPageRef {
+  document_id: string
+  page_id: string
+  page_number: number
+}
+
+export interface SubDocument {
+  id: string
+  case_type: string
+  document_type: string
+  page_refs: SubDocumentPageRef[]
+  created_at?: string
+}
+
+// Split & Classify
+export interface SplitClassifySegment {
+  document_type: string
+  page_numbers: number[]
+}
+
+export interface SplitClassifyResult {
+  segments: SplitClassifySegment[]
+  subdocuments: SubDocument[]
+}
+
+// Viewer modes
+export type ViewerMode = 'document' | 'page'
+export type DocumentViewerTab = 'pdf' | 'markdown'
+export type PageViewerTab = 'page-view' | 'html' | 'markdown'
 
 export interface HighlightRect {
   x: number

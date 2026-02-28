@@ -32,7 +32,8 @@ The UI follows a **unified gallery architecture**: a single `GalleryView` serves
 | HTTP           | Axios                | Interceptors for error handling         |
 | Routing        | Vue Router 4         | Lazy loading, route metadata for modals |
 | Icons          | Lucide Vue Next      | Consistent, tree-shakeable icon set     |
-| PDF Viewer     | PDF.js (`pdfjs-dist`)| Renders PDF pages on canvas, supports text layer and highlight annotations |
+| PDF Viewer     | `@tato30/vue-pdf`    | Vue 3 wrapper for PDF.js with built-in text/annotation layers and search highlighting |
+| Markdown       | `markdown-it`        | Renders markdown/HTML content in viewer tabs |
 | Date Picker    | `@vuepic/vue-datepicker` | Rich date-range selection component  |
 | Notifications  | Vue Toastification   | Toast messages for user feedback        |
 | Auth           | `@azure/msal-browser` | Microsoft Entra ID OAuth redirect flow  |
@@ -93,8 +94,8 @@ The UI follows a **unified gallery architecture**: a single `GalleryView` serves
   More menu: bottom sheet with Upload, Settings links
 ```
 
-- **Top Bar** -- fixed; contains sidebar toggle and app logo on the left, a centered search bar with `Cmd+K` shortcut hint, and action buttons on the right: Upload, Settings, Simple/Advanced mode toggle, and theme cycle (Light → Dark → System).
-- **Sidebar** -- contains two tab buttons (Documents / Cases) at the top. When the Documents tab is active, displays collapsible filter sections (status, file type, document type, sort, advanced filters with tags and date range). When collapsed, shows only icon buttons. On tablet, opens as a drawer overlay with backdrop. Hidden on mobile.
+- **Top Bar** -- fixed; contains sidebar toggle, app logo, and Cases link on the left; a centered search bar with `Cmd+K` shortcut hint; and action buttons on the right: Upload, Settings, Simple/Advanced mode toggle, and theme cycle (Light → Dark → System).
+- **Sidebar** -- search-option focused. No Documents/Cases tabs. Displays collapsible filter sections (status, file type, document type, sort), sorting controls, and advanced search settings (search mode, fulltext/vector/hybrid parameter tuning). When collapsed, shows only icon buttons. On tablet, opens as a drawer overlay with backdrop. Hidden on mobile.
 - **Main Content Area** -- scrollable; renders the active route (`GalleryView` or `CasesGalleryView`).
 - **Right Viewer Panel** -- resizable side panel (300px – 75% viewport, default 420px) for the document viewer. Appears when a document is opened. On desktop/wide: inline panel with drag-to-resize handle. On tablet/mobile: full-screen overlay. The PDF viewer fills the full vertical space between the header and a bottom toolbar. Metadata, tags, duplicates, and advanced sections are in a slide-over info panel toggled by an info button in the header. Filter sections (Status, File Type) in the sidebar start **collapsed** by default to reduce visual clutter.
 - **Mobile Tab Bar** -- bottom navigation with Documents, Cases, and More tabs. More opens a bottom sheet with Upload and Settings links.
@@ -163,21 +164,26 @@ The unified gallery serves as both the document browser and the search results v
 
 | Element              | Description |
 |----------------------|-------------|
-| Document grid/list   | `DocumentGrid` renders documents as cards (grid mode) or rows (list mode). Each item shows file name, type badge, status badge, tags, and created date. Clicking opens the Right Viewer Panel. |
-| Sidebar filters      | In the sidebar: collapsible status filter (checkboxes), file type filter (checkboxes), document type dropdown, sort-by and sort-order dropdowns. Advanced filters section (collapsed by default) contains tags input and date range picker. Active filters shown as removable chips above the filter sections. |
+| Document grid/list   | `DocumentGrid` renders documents as cards (grid mode) or rows (list mode). **Card view**: shows thumbnail of first page (via page thumbnail endpoint), page count, sub-document count, file size, status badge (derived: New/Parsing/Parsed/Classified/Failed), file type badge, tags. **List/table view**: same data in tabular format with mini-thumbnail, name, type, status, tags, sub-docs, pages, size, created date columns. Clicking opens the Right Viewer Panel in **document mode**. |
+| Status display       | Derived display status: `new` → gray "New", `parsing` → amber "Parsing", `parsed` → green "Parsed", `parsed` + `subdocuments.length > 0` → blue "Classified", `failed` → red "Failed". |
+| Sidebar filters      | In the sidebar: collapsible status filter (checkboxes), file type filter (checkboxes), document type dropdown, sort-by and sort-order dropdowns, tags chip input, date range pickers, and advanced search settings (collapsed by default). Active filters shown as removable chips above the filter sections. |
 | Pagination           | Page size selector (25, 50, 100) and page navigation at the bottom. |
-| Bulk actions bar     | Appears when one or more documents are selected. Actions: Parse, Add Tags, Remove Tags, Assign to Case, Delete. |
+| Bulk actions bar     | Appears when one or more documents are selected. Actions: Parse, **Split & Classify**, Add Tags, Assign to Case, Delete. Split & Classify auto-parses unparsed documents first. |
 
 #### Search Results Mode (with `?q=` query param)
 
 | Element              | Description |
 |----------------------|-------------|
-| Search results list  | `SearchResultsList` renders results as cards showing: file name, page number, relevance score, content snippet with highlighted terms, tags. |
-| Result actions       | Clicking a result opens the Right Viewer Panel at the matched page with highlights. |
+| Page results grid    | `PageResultsGrid` renders search results as **page cards** in a grid/list layout. Each card shows: page thumbnail (from thumbnail endpoint), document name, page number badge, text snippet with highlighted terms, relevance score, tags. |
+| Result actions       | Clicking a page result opens the Right Viewer Panel in **page mode** at the matched page with highlights. |
 
-Search is initiated from the **Top Bar search bar**, which debounces input by 300ms and updates the URL query parameter. The `GalleryView` watches `route.query` and switches between document listing and search results accordingly.
+Search is initiated from the **Top Bar search bar**, which debounces input by 300ms and updates the URL query parameter. The `GalleryView` watches `route.query` and uses `useSearchStore` for search execution, switching between document listing and page results accordingly.
 
-#### Sidebar Filter Sections (Documents tab)
+#### Sidebar Sections (search-option focused)
+
+The sidebar has no Documents/Cases tabs. It is structured as follows:
+
+**1. Base Filters** (always visible, each collapsible):
 
 | Section              | Behavior |
 |----------------------|----------|
@@ -185,10 +191,28 @@ Search is initiated from the **Top Bar search bar**, which debounces input by 30
 | Status               | Collapsible (collapsed by default). Checkbox list: New, Parsing, Parsed, Failed. Single-select (click again to deselect). |
 | File Type            | Collapsible (collapsed by default). Checkbox list: PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT. Single-select. |
 | Document Type        | Dropdown: All, Generic. |
-| Sort By              | Dropdown: Created Date, Modified Date, Name, Status. Plus ascending/descending dropdown. |
-| Advanced Filters     | Collapsed by default. Contains: Tags (chip input), Date Range (date picker). |
+| Created date range   | Date range picker for document creation date. |
+| Modified date range  | Date range picker for last modified date. |
+| Tags                 | Chip input for tag filtering. |
 
-All filter changes sync to URL query params via `router.replace()`, enabling bookmarkable filtered views.
+**2. Sorting**:
+
+| Section              | Behavior |
+|----------------------|----------|
+| Sort By              | Dropdown: Created Date, Modified Date, Size, Page Count. |
+| Sort Order           | Ascending / Descending dropdown. |
+
+**3. Advanced Search Settings** (collapsed by default):
+
+| Section              | Behavior |
+|----------------------|----------|
+| Search mode          | Radio group: Fulltext / Vector / Hybrid. |
+| Fulltext config      | `content_field` input, fuzzy toggle + `max_edits` + `prefix_length`, `score_boost` number. |
+| Vector config        | Index selector (from `GET /search/indices`), embedding model, `num_candidates`, `score_boost`. |
+| Hybrid config        | Combination method (RRF / Weighted Sum), `rrf_k`, weight sliders. |
+| Global search params | `top_k`, `min_score`, `include_content_fields`. |
+
+All filter changes sync to URL query params via `router.replace()`, enabling bookmarkable filtered views. The Cases link has moved to the TopBar (alongside the logo).
 
 #### Advanced Mode Additions
 
@@ -209,7 +233,12 @@ All filter changes sync to URL query params via `router.replace()`, enabling boo
 
 ### 3.3 Document Viewer (Right Panel)
 
-The document viewer is embedded in a **resizable right-side panel** (`RightViewerPanel`) within the `AppShell`. Opening a document (via gallery click or navigating to `/doc/:id`) sets `viewerOpen = true` in the app store and renders the panel alongside the gallery.
+The document viewer is embedded in a **resizable right-side panel** (`RightViewerPanel`) within the `AppShell`. It operates in two modes:
+
+- **Document mode** — opened when clicking a document card. Shows the full document with PDF and markdown tabs.
+- **Page mode** — opened when clicking a search result. Shows a single page with page image, HTML, and markdown tabs.
+
+Opening a document (via gallery click or navigating to `/doc/:id`) sets `viewerOpen = true` in the app store and renders the panel alongside the gallery.
 
 #### Panel Layout
 
@@ -217,9 +246,12 @@ The document viewer is embedded in a **resizable right-side panel** (`RightViewe
 +------------------------------------------+
 | Header: [doc name]    [Info] [Max] [Close]|
 +------------------------------------------+
+| Tab bar:                                  |
+|   Document mode: [PDF] [Markdown]         |
+|   Page mode: [Page View] [HTML] [Markdown]|
++------------------------------------------+
 |                                          |
-|          PDF Viewer (full height)         |
-|          (canvas + text layer)            |
+|          Tab Content (full height)        |
 |                                          |
 +------------------------------------------+
 | Bottom toolbar:                          |
@@ -231,24 +263,55 @@ The document viewer is embedded in a **resizable right-side panel** (`RightViewe
 |----------------------|-------------|
 | Resize handle        | 6px-wide draggable area on the left edge. Changes cursor to `col-resize`. Panel width clamped to 300px – 75% viewport. |
 | Header               | Document file name (truncated) with Info toggle, Maximize, and Close buttons. |
-| Document viewer      | `DocumentViewer` component rendering the PDF or image. Fills the full vertical space between header and bottom toolbar (`flex-1 min-h-0`). |
+| Tab bar              | Below header. Shows tabs based on `viewerMode`: Document mode shows PDF + Markdown; Page mode shows Page View + HTML + Markdown. |
+| Tab content          | Routes to the appropriate viewer component based on mode + active tab. Fills the full vertical space between tab bar and bottom toolbar (`flex-1 min-h-0`). |
 | Info panel           | Slide-over panel on the right side of the viewer, toggled by the Info button in the header. Contains metadata, tags, duplicates, and advanced sections. Absolutely positioned overlay, scrollable. |
 | Bottom toolbar       | Always visible (`shrink-0`). Page navigation (Prev/Next + "Page N / Total") on the left. Search result navigation ("Result X of Y" + Prev/Next) on the right when opened from search. |
 
 On tablet and mobile, the viewer opens as a **full-screen overlay** (fixed position, z-50) instead of an inline panel.
 
-#### PDF Viewer
+#### Document Mode Tabs
+
+**PDF Tab** (`VuePdfViewer`):
 
 | Element             | Description |
 |---------------------|-------------|
-| Page canvas         | Renders the current PDF page via PDF.js onto a `<canvas>` element at high resolution. |
-| Text layer          | Transparent text overlay on top of the canvas for text selection and highlight positioning. |
+| Vue PDF component   | Uses `@tato30/vue-pdf`'s `<VuePDF>` component with `text-layer` and `annotation-layer` enabled. |
+| Search highlighting | Uses the built-in `highlight-text` prop for search term highlighting. |
+| Annotation overlay  | A positioned `<div>` sibling (`position: absolute; inset: 0; pointer-events: none`) serves as the annotation overlay layer. Accepts annotation rects (from `DocumentElement.element_data.boundingRegions`) and renders positioned tooltip-enabled boxes. Foundation for future extraction result annotations. |
 | Page navigation     | Previous / Next buttons, page number input, total page count. Keyboard: arrow keys. |
-| Zoom controls       | Zoom in, zoom out, fit-to-width, fit-to-page. Pinch-to-zoom on touch devices. |
-| Thumbnail sidebar   | Vertical strip of page thumbnails on the left (hideable on mobile). Active page is highlighted. Click to jump. |
-| Highlight overlay   | When opened from a search result, the viewer scrolls to the matched page and highlights matching text. **MVP implementation** uses the pdf.js text layer: after rendering the text layer spans, the viewer walks them to find case-insensitive query matches and wraps them with `<mark>` elements styled with `--color-highlight`. Future versions may use element bounding boxes from `DocumentElement.element_data`. |
-| Search result nav   | When opened from search, the bottom toolbar shows "Result X of Y" with Prev/Next buttons to cycle through search results across pages and documents. |
-| Element annotations | On hover/click of a highlighted region, a tooltip shows the element type, short_id, and extracted text. |
+
+**Markdown Tab** (`MarkdownViewer`):
+
+| Element             | Description |
+|---------------------|-------------|
+| Rendered markdown   | `document.content` rendered as markdown via `markdown-it`. |
+| Raw toggle          | Button to toggle between rendered and raw markdown views. |
+| Go to page links    | Links in the rendered content that switch to page mode for the referenced page. |
+
+#### Page Mode Tabs
+
+**Page View Tab** (`PageImageViewer`):
+
+| Element             | Description |
+|---------------------|-------------|
+| Page image          | Full-resolution page image from the thumbnail endpoint (high-res width). |
+| Zoom controls       | Scroll wheel zoom and pan support. |
+| Search highlight    | Overlay for search term highlight positioning. |
+
+**HTML Tab** (`HtmlViewer`):
+
+| Element             | Description |
+|---------------------|-------------|
+| Rendered HTML       | `page.content_html` rendered as HTML. |
+| Raw toggle          | Button to toggle between rendered HTML and raw source view. |
+
+**Markdown Tab** (`MarkdownViewer`):
+
+| Element             | Description |
+|---------------------|-------------|
+| Rendered markdown   | `page.content_markdown` rendered via `markdown-it`. |
+| Raw toggle          | Button to toggle between rendered and raw markdown views. |
 
 #### Image Viewer
 
@@ -447,11 +510,16 @@ mydocs-ui/
         SearchFilters.vue
         SearchAdvancedPanel.vue
         SearchResultCard.vue
+        PageResultCard.vue           # Page search result card with thumbnail
+        PageResultsGrid.vue          # Grid/list container for page search results
         ScoreBreakdown.vue           # Fulltext/vector/combined scores
       viewer/
-        DocumentViewer.vue           # Orchestrates PDF or image viewer
-        PdfViewer.vue                # PDF.js canvas + text layer
-        ImageViewer.vue              # Zoomable image
+        DocumentViewer.vue           # Orchestrates viewer based on file type and mode
+        VuePdfViewer.vue             # @tato30/vue-pdf PDF viewer with annotation overlay layer
+        MarkdownViewer.vue           # Markdown rendered/raw viewer (used in document & page mode)
+        HtmlViewer.vue               # HTML rendered/raw viewer (used in page mode)
+        PageImageViewer.vue          # Page image viewer with zoom (used in page mode)
+        ImageViewer.vue              # Zoomable image (for image file types)
         HighlightOverlay.vue         # Bounding box highlights
         ThumbnailSidebar.vue
         ViewerToolbar.vue
@@ -462,10 +530,13 @@ mydocs-ui/
         AddToCaseMenu.vue            # Assign documents to a case
     composables/
       useSearch.ts                   # Search logic, debouncing
-      useDocumentViewer.ts           # PDF.js lifecycle, page navigation, file URL
+      useDocumentViewer.ts           # Document/page data loading, page navigation, file URL
+      useMarkdownRenderer.ts         # markdown-it wrapper with code highlighting
       useHighlights.ts              # Compute highlight rects from elements
       useKeyboardShortcuts.ts        # Global keyboard shortcut handler
       useResponsive.ts               # Breakpoint-aware reactive state (4 breakpoints)
+    utils/
+      format.ts                      # formatFileSize, getDisplayStatus utilities
     types/
       index.ts                       # TypeScript interfaces mirroring backend models
     assets/
@@ -501,7 +572,7 @@ interface UseDocumentViewer {
   totalPages: Ref<number>
   zoom: Ref<number>
   loading: Ref<boolean>
-  pdfDoc: Ref<any>               // Raw PDF.js document object
+  currentPageData: Ref<DocumentPage | null>  // Current page data for page-mode tabs
   fileUrl: Ref<string>           // URL to the original file for rendering
   goToPage(n: number): void
   nextPage(): void
@@ -509,6 +580,17 @@ interface UseDocumentViewer {
   setZoom(level: number): void
   fitToWidth(): void
   fitToPage(): void
+  loadPageData(pageNumber: number): Promise<void>  // Load page data for page-mode
+}
+```
+
+#### `useMarkdownRenderer()`
+
+Wraps `markdown-it` with code highlighting for rendering markdown content in viewer tabs.
+
+```typescript
+interface UseMarkdownRenderer {
+  render(markdown: string): string  // Returns rendered HTML string
 }
 ```
 
@@ -688,7 +770,7 @@ export async function checkHealth(): Promise<{ status: string; latencyMs: number
 - **Virtual scrolling** -- document and search result lists use virtual scrolling for lists exceeding 100 items.
 - **Debounced search** -- 300ms debounce on search input in the Top Bar to avoid excessive API calls.
 - **PDF page caching** -- PDF.js renders only the visible page and one page ahead/behind; decoded pages are cached in memory (LRU, max 10 pages).
-- **Image thumbnails** -- document grid view uses server-generated thumbnails (future backend endpoint) with lazy loading via `IntersectionObserver`.
+- **Page thumbnails** -- document grid and search result cards use server-generated page thumbnails via `GET /api/v1/documents/{id}/pages/{num}/thumbnail?width=300`. Thumbnails are cached in the storage backend alongside original files. Lazy loading via `IntersectionObserver`.
 - **Bundle size** -- PDF.js worker loaded as a separate chunk; Tailwind purges unused styles in production.
 - **URL-driven state** -- filters and search queries are synced to URL params, avoiding unnecessary store hydration on navigation.
 

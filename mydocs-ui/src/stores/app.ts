@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import type { SearchResult } from '@/types'
+import type { SearchResult, ViewerMode, DocumentViewerTab, PageViewerTab } from '@/types'
 
 export type AppMode = 'simple' | 'advanced'
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -18,6 +18,11 @@ export const useAppStore = defineStore('app', () => {
   const viewerPage = ref<number>(1)
   const activeTab = ref<ActiveTab>('documents')
   const galleryViewMode = ref<GalleryViewMode>('grid')
+
+  // Viewer mode & tabs
+  const viewerMode = ref<ViewerMode>('document')
+  const viewerActiveDocumentTab = ref<DocumentViewerTab>('pdf')
+  const viewerActivePageTab = ref<PageViewerTab>('page-view')
 
   // Search viewer context
   const viewerHighlightQuery = ref('')
@@ -46,11 +51,29 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
-  function openViewer(id: string, page = 1, highlightQuery = '') {
+  function openViewer(id: string, page = 1, highlightQuery = '', modeParam: ViewerMode = 'document') {
     viewerDocumentId.value = id
     viewerPage.value = page
     viewerHighlightQuery.value = highlightQuery
+    viewerMode.value = modeParam
     viewerOpen.value = true
+    // Reset tabs to defaults for the mode
+    if (modeParam === 'document') {
+      viewerActiveDocumentTab.value = 'pdf'
+    } else {
+      viewerActivePageTab.value = 'page-view'
+    }
+  }
+
+  function switchToPageMode(pageNumber: number) {
+    viewerMode.value = 'page'
+    viewerPage.value = pageNumber
+    viewerActivePageTab.value = 'page-view'
+  }
+
+  function switchToDocumentMode() {
+    viewerMode.value = 'document'
+    viewerActiveDocumentTab.value = 'pdf'
   }
 
   function closeViewer() {
@@ -60,6 +83,9 @@ export const useAppStore = defineStore('app', () => {
     viewerHighlightQuery.value = ''
     viewerSearchResults.value = []
     viewerCurrentResultIndex.value = 0
+    viewerMode.value = 'document'
+    viewerActiveDocumentTab.value = 'pdf'
+    viewerActivePageTab.value = 'page-view'
   }
 
   function setViewerSearchContext(results: SearchResult[], query: string, startIndex: number) {
@@ -96,9 +122,11 @@ export const useAppStore = defineStore('app', () => {
   return {
     mode, theme, sidebarCollapsed,
     viewerOpen, viewerDocumentId, viewerPage, activeTab, galleryViewMode,
+    viewerMode, viewerActiveDocumentTab, viewerActivePageTab,
     viewerHighlightQuery, viewerSearchResults, viewerCurrentResultIndex,
     toggleMode, setTheme, applyTheme, toggleSidebar,
-    openViewer, closeViewer, setViewerSearchContext, nextSearchResult, prevSearchResult,
+    openViewer, closeViewer, switchToPageMode, switchToDocumentMode,
+    setViewerSearchContext, nextSearchResult, prevSearchResult,
   }
 }, {
   persist: {
