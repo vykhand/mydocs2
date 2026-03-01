@@ -78,6 +78,13 @@ function cycleTheme() {
       <router-link to="/" class="flex items-center gap-2 font-semibold text-lg" style="color: var(--color-text-primary);">
         <span>mydocs</span>
       </router-link>
+      <router-link
+        to="/cases"
+        class="text-sm font-medium px-2 py-1 rounded hover:opacity-80 transition-opacity"
+        :style="{ color: $route.path.startsWith('/cases') ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
+      >
+        Cases
+      </router-link>
     </div>
 
     <!-- Center: search bar (hidden on mobile) -->

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAppStore } from '@/stores/app'
+import { useDocumentsStore } from '@/stores/documents'
 import { LayoutGrid, List } from 'lucide-vue-next'
 
 defineProps<{
@@ -7,13 +8,31 @@ defineProps<{
 }>()
 
 const appStore = useAppStore()
+const docsStore = useDocumentsStore()
+
+const allSelected = () => docsStore.documents.length > 0 && docsStore.documents.every(d => docsStore.selectedIds.has(d.id))
+
+function toggleAll() {
+  if (allSelected()) {
+    docsStore.clearSelection()
+  } else {
+    docsStore.selectAll()
+  }
+}
 </script>
 
 <template>
   <div class="flex items-center justify-between">
-    <p class="text-sm" style="color: var(--color-text-secondary);">
-      {{ resultCount }} {{ resultCount === 1 ? 'result' : 'results' }}
-    </p>
+    <div class="flex items-center gap-3">
+      <!-- Select all checkbox (grid mode) -->
+      <label v-if="appStore.galleryViewMode === 'grid'" class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" :checked="allSelected()" @change="toggleAll" class="rounded" />
+        <span class="text-xs" style="color: var(--color-text-secondary);">Select all</span>
+      </label>
+      <p class="text-sm" style="color: var(--color-text-secondary);">
+        {{ resultCount }} {{ resultCount === 1 ? 'result' : 'results' }}
+      </p>
+    </div>
     <div class="flex items-center gap-1">
       <button
         @click="appStore.galleryViewMode = 'grid'"

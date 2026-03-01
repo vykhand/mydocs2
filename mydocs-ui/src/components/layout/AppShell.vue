@@ -11,6 +11,13 @@ const appStore = useAppStore()
 const { isMobile, isTablet, isDesktop, isWide } = useResponsive()
 const viewerPanelWidth = ref(420)
 
+const effectiveViewerWidth = computed(() => {
+  if (appStore.viewerOpen && appStore.elementsDisplayActive && appStore.elementsDisplayExpanded) {
+    return Math.max(viewerPanelWidth.value, Math.floor(window.innerWidth * 0.7))
+  }
+  return viewerPanelWidth.value
+})
+
 onMounted(() => {
   appStore.applyTheme()
 })
@@ -61,10 +68,10 @@ const showSidebarDrawer = computed(() => {
         v-if="appStore.viewerOpen"
         v-model:panel-width="viewerPanelWidth"
         :class="{
-          'shrink-0 border-l': isWide || isDesktop,
+          'shrink-0 border-l transition-[width] duration-300': isWide || isDesktop,
           'fixed inset-0 z-50': isTablet || isMobile,
         }"
-        :style="(isWide || isDesktop) ? { width: viewerPanelWidth + 'px' } : undefined"
+        :style="(isWide || isDesktop) ? { width: effectiveViewerWidth + 'px' } : undefined"
       />
     </div>
     <MobileTabBar v-if="isMobile" />

@@ -343,6 +343,29 @@ GET /api/v1/documents/{document_id}/pages
 GET /api/v1/documents/{document_id}/pages/{page_number}
 ```
 
+### 3.9.1 Get Page Thumbnail
+
+```
+GET /api/v1/documents/{document_id}/pages/{page_number}/thumbnail?width=300
+```
+
+Returns a JPEG thumbnail of the specified page.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `width` | int | `300` | Thumbnail width in pixels (16–2048) |
+
+**Response**: Binary JPEG image (`Content-Type: image/jpeg`) or `307` redirect to a SAS URL when using Azure Blob storage.
+
+**Headers**:
+- `Cache-Control: max-age=3600`
+
+**Caching**: Thumbnails are cached alongside original files in the storage backend using the naming convention `{doc_id}.p{N}.thumb.jpg`. A cache check is performed before generation.
+
+**Errors**:
+- `404 DOCUMENT_NOT_FOUND` — Document or page does not exist
+- `400 INVALID_REQUEST` — Unsupported file type (only PDF and image files supported)
+
 ### 3.10 Manage Tags
 ```
 POST /api/v1/documents/{document_id}/tags

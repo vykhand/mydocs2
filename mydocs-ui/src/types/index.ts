@@ -52,6 +52,7 @@ export interface Document {
   parser_engine?: string
   parser_config_hash?: string
   elements?: DocumentElement[]
+  subdocuments?: SubDocument[]
   tags: string[]
   created_at?: string
   modified_at?: string
@@ -246,6 +247,73 @@ export interface ExtractionResponse {
   results: Record<string, FieldResult>
   model_used: string
   reference_granularity: string
+}
+
+// Sub-documents (from split & classify)
+export interface SubDocumentPageRef {
+  document_id: string
+  page_id: string
+  page_number: number
+}
+
+export interface SubDocument {
+  id: string
+  case_type: string
+  document_type: string
+  page_refs: SubDocumentPageRef[]
+  created_at?: string
+}
+
+// Split & Classify
+export interface SplitClassifySegment {
+  document_type: string
+  page_numbers: number[]
+}
+
+export interface SplitClassifyResult {
+  segments: SplitClassifySegment[]
+  subdocuments: SubDocument[]
+}
+
+// Viewer modes
+export type ViewerMode = 'document' | 'page'
+export type DocumentViewerTab = 'pdf' | 'markdown'
+export type PageViewerTab = 'pdf' | 'html' | 'markdown'
+
+export interface ElementAnnotation {
+  elementId: string
+  shortId?: string
+  type: DocumentElementType
+  x: number        // % of page width
+  y: number        // % of page height
+  width: number    // % of page width
+  height: number   // % of page height
+  contentPreview: string
+  pageNumber: number
+}
+
+export const ELEMENT_TYPE_COLORS: Record<DocumentElementType, string> = {
+  paragraph: 'rgba(59, 130, 246, 0.25)',
+  table: 'rgba(34, 197, 94, 0.25)',
+  key_value_pair: 'rgba(168, 85, 247, 0.25)',
+  image: 'rgba(234, 179, 8, 0.25)',
+  barcode: 'rgba(239, 68, 68, 0.25)',
+}
+
+export const ELEMENT_TYPE_BORDER_COLORS: Record<DocumentElementType, string> = {
+  paragraph: 'rgba(59, 130, 246, 0.6)',
+  table: 'rgba(34, 197, 94, 0.6)',
+  key_value_pair: 'rgba(168, 85, 247, 0.6)',
+  image: 'rgba(234, 179, 8, 0.6)',
+  barcode: 'rgba(239, 68, 68, 0.6)',
+}
+
+export const ELEMENT_TYPE_LABELS: Record<DocumentElementType, string> = {
+  paragraph: 'Paragraph',
+  table: 'Table',
+  key_value_pair: 'Key-Value',
+  image: 'Image',
+  barcode: 'Barcode',
 }
 
 export interface HighlightRect {

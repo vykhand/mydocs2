@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Document } from '@/types'
-import PdfViewer from './PdfViewer.vue'
+import VuePdfViewer from './VuePdfViewer.vue'
 import ImageViewer from './ImageViewer.vue'
 
 const props = defineProps<{
@@ -14,6 +14,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   goToPage: [page: number]
+  totalPagesResolved: [total: number]
+  pdfPageDimensions: [dims: { width: number; height: number }]
 }>()
 
 const isPdf = computed(() => props.document.file_type === 'pdf')
@@ -22,13 +24,18 @@ const isImage = computed(() => ['jpeg', 'png', 'bmp', 'tiff'].includes(props.doc
 
 <template>
   <div class="h-full">
-    <PdfViewer
+    <VuePdfViewer
       v-if="isPdf"
       :file-url="fileUrl"
       :page="currentPage"
-      :zoom="zoom"
       :highlight-query="highlightQuery"
-    />
+      @total-pages-resolved="(t: number) => emit('totalPagesResolved', t)"
+      @pdf-page-dimensions="(d: { width: number; height: number }) => emit('pdfPageDimensions', d)"
+    >
+      <template #page-overlay="slotProps">
+        <slot name="page-overlay" v-bind="slotProps" />
+      </template>
+    </VuePdfViewer>
     <ImageViewer
       v-else-if="isImage"
       :file-url="fileUrl"

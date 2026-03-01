@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, watch, onBeforeUnmount } from 'vue'
+import { computed, watch, onBeforeUnmount, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useResponsive } from '@/composables/useResponsive'
 import { useDocumentViewer } from '@/composables/useDocumentViewer'
+import { useElementDisplay } from '@/composables/useElementDisplay'
 import DocumentViewer from '@/components/viewer/DocumentViewer.vue'
-import { X, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Info } from 'lucide-vue-next'
-import { ref } from 'vue'
+import MarkdownViewer from '@/components/viewer/MarkdownViewer.vue'
+import HtmlViewer from '@/components/viewer/HtmlViewer.vue'
+import SplitViewContainer from '@/components/viewer/SplitViewContainer.vue'
+import ElementAnnotationOverlay from '@/components/viewer/ElementAnnotationOverlay.vue'
+import ElementBrowser from '@/components/viewer/ElementBrowser.vue'
+import { X, Maximize2, Minimize2, ChevronLeft, ChevronRight, Info, FileText, ArrowLeft, Layers } from 'lucide-vue-next'
 
 const panelWidth = defineModel<number>('panelWidth', { default: 420 })
 
@@ -34,9 +39,46 @@ watch(() => appStore.viewerPage, (newPage) => {
   }
 })
 
-// Handle totalPagesResolved from PdfViewer
+// Load page data when in page mode and page changes
+watch([() => appStore.viewerMode, () => viewer.currentPage.value], ([mode, page]) => {
+  if (mode === 'page' && page) {
+    viewer.loadPageData(page)
+  }
+}, { immediate: true })
+
+// Handle totalPagesResolved from VuePdfViewer
 function onTotalPagesResolved(total: number) {
   viewer.totalPages.value = total
+}
+
+// Tab definitions
+const documentTabs = [
+  { key: 'pdf' as const, label: 'PDF' },
+  { key: 'markdown' as const, label: 'Markdown' },
+]
+
+const pageTabs = [
+  { key: 'pdf' as const, label: 'PDF' },
+  { key: 'html' as const, label: 'HTML' },
+  { key: 'markdown' as const, label: 'Markdown' },
+]
+
+const activeTabs = computed(() =>
+  appStore.viewerMode === 'document' ? documentTabs : pageTabs
+)
+
+const activeTabKey = computed(() =>
+  appStore.viewerMode === 'document'
+    ? appStore.viewerActiveDocumentTab
+    : appStore.viewerActivePageTab
+)
+
+function setActiveTab(key: string) {
+  if (appStore.viewerMode === 'document') {
+    appStore.viewerActiveDocumentTab = key as 'pdf' | 'markdown'
+  } else {
+    appStore.viewerActivePageTab = key as 'pdf' | 'html' | 'markdown'
+  }
 }
 
 // Horizontal resize handle logic
@@ -69,6 +111,34 @@ const searchResultLabel = computed(() => {
   return `Result ${appStore.viewerCurrentResultIndex + 1} of ${appStore.viewerSearchResults.length}`
 })
 
+// Element display — use pdfjs native page dimensions for accurate overlay alignment
+const elementsRef = computed(() => viewer.document.value?.elements || [])
+const pdfPageDims = ref<{ width: number; height: number } | null>(null)
+const { annotations } = useElementDisplay(elementsRef, viewer.pages, viewer.currentPage, pdfPageDims)
+
+function onPdfPageDimensions(dims: { width: number; height: number }) {
+  pdfPageDims.value = dims
+}
+
+const hasElements = computed(() => (viewer.document.value?.elements?.length || 0) > 0)
+
+const showElementsDisplay = computed(() =>
+  appStore.elementsDisplayActive && activeTabKey.value === 'pdf'
+)
+
+function handleElementSelect(elementId: string) {
+  appStore.setActiveElement(elementId)
+  const el = viewer.document.value?.elements?.find(e => e.id === elementId)
+  if (el && el.page_number !== viewer.currentPage.value) {
+    viewer.goToPage(el.page_number)
+  }
+}
+
+// Handle go-to-page from markdown viewer (switch to page mode)
+function handleGoToPage(page: number) {
+  appStore.switchToPageMode(page)
+}
+
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
@@ -96,19 +166,31 @@ onBeforeUnmount(() => {
       </h3>
       <div class="flex items-center gap-1">
         <button
+          v-if="hasElements"
+          @click="appStore.toggleElementsDisplay()"
+          class="p-1 rounded hover:opacity-70"
+          :style="{ color: appStore.elementsDisplayActive ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
+          title="Display Elements"
+        >
+          <Layers :size="16" />
+        </button>
+        <button
+          v-if="appStore.elementsDisplayActive"
+          @click="appStore.toggleElementsExpanded()"
+          class="p-1 rounded hover:opacity-70"
+          style="color: var(--color-text-secondary);"
+          :title="appStore.elementsDisplayExpanded ? 'Collapse' : 'Expand'"
+        >
+          <Minimize2 v-if="appStore.elementsDisplayExpanded" :size="16" />
+          <Maximize2 v-else :size="16" />
+        </button>
+        <button
           @click="showInfoPanel = !showInfoPanel"
           class="p-1 rounded hover:opacity-70"
           :style="{ color: showInfoPanel ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
           title="Document Info"
         >
           <Info :size="16" />
-        </button>
-        <button
-          class="p-1 rounded hover:opacity-70"
-          style="color: var(--color-text-secondary);"
-          title="Maximize"
-        >
-          <Maximize2 :size="16" />
         </button>
         <button
           @click="appStore.closeViewer()"
@@ -121,24 +203,122 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Content area: PDF viewer fills available space -->
+    <!-- Tab bar -->
+    <div class="flex border-b shrink-0" style="border-color: var(--color-border);">
+      <button
+        v-for="tab in activeTabs"
+        :key="tab.key"
+        @click="setActiveTab(tab.key)"
+        class="flex-1 py-2 text-xs font-medium transition-colors border-b-2"
+        :style="{
+          color: activeTabKey === tab.key ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+          borderBottomColor: activeTabKey === tab.key ? 'var(--color-accent)' : 'transparent',
+        }"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+
+    <!-- Content area -->
     <div class="flex-1 min-h-0 relative">
       <!-- Loading spinner -->
       <div v-if="viewer.loading.value" class="flex items-center justify-center h-full">
         <div class="animate-spin w-6 h-6 border-2 border-t-transparent rounded-full" style="border-color: var(--color-accent); border-top-color: transparent;" />
       </div>
 
-      <!-- Document viewer (full height) -->
-      <DocumentViewer
-        v-else-if="viewer.document.value"
-        :document="viewer.document.value"
-        :current-page="viewer.currentPage.value"
-        :zoom="viewer.zoom.value"
-        :file-url="viewer.fileUrl.value"
-        :highlight-query="appStore.viewerHighlightQuery"
-        @go-to-page="viewer.goToPage"
-        class="h-full"
-      />
+      <template v-else-if="viewer.document.value">
+        <!-- PDF with Elements Display split view -->
+        <template v-if="showElementsDisplay && activeTabKey === 'pdf'">
+          <SplitViewContainer
+            :direction="appStore.elementsDisplayExpanded ? 'vertical' : 'horizontal'"
+            :initial-ratio="0.6"
+            class="h-full"
+          >
+            <template #first>
+              <DocumentViewer
+                :document="viewer.document.value"
+                :current-page="viewer.currentPage.value"
+                :zoom="viewer.zoom.value"
+                :file-url="viewer.fileUrl.value"
+                :highlight-query="appStore.viewerHighlightQuery"
+                @go-to-page="viewer.goToPage"
+                @total-pages-resolved="onTotalPagesResolved"
+                @pdf-page-dimensions="onPdfPageDimensions"
+                class="h-full"
+              >
+                <template #page-overlay>
+                  <ElementAnnotationOverlay
+                    :annotations="annotations"
+                    :active-element-id="appStore.activeElementId"
+                    @select="handleElementSelect"
+                  />
+                </template>
+              </DocumentViewer>
+            </template>
+            <template #second>
+              <ElementBrowser
+                :elements="viewer.document.value.elements || []"
+                :current-page="viewer.currentPage.value"
+                :active-element-id="appStore.activeElementId"
+                @select="handleElementSelect"
+                @go-to-page="viewer.goToPage"
+              />
+            </template>
+          </SplitViewContainer>
+        </template>
+
+        <!-- DOCUMENT MODE (normal) -->
+        <template v-else-if="appStore.viewerMode === 'document'">
+          <!-- PDF tab -->
+          <DocumentViewer
+            v-if="appStore.viewerActiveDocumentTab === 'pdf'"
+            :document="viewer.document.value"
+            :current-page="viewer.currentPage.value"
+            :zoom="viewer.zoom.value"
+            :file-url="viewer.fileUrl.value"
+            :highlight-query="appStore.viewerHighlightQuery"
+            @go-to-page="viewer.goToPage"
+            @total-pages-resolved="onTotalPagesResolved"
+            class="h-full"
+          />
+          <!-- Markdown tab -->
+          <MarkdownViewer
+            v-else-if="appStore.viewerActiveDocumentTab === 'markdown'"
+            :content="viewer.document.value.content || ''"
+            @go-to-page="handleGoToPage"
+            class="h-full"
+          />
+        </template>
+
+        <!-- PAGE MODE (normal) -->
+        <template v-else>
+          <!-- PDF tab -->
+          <DocumentViewer
+            v-if="appStore.viewerActivePageTab === 'pdf'"
+            :document="viewer.document.value"
+            :current-page="viewer.currentPage.value"
+            :zoom="viewer.zoom.value"
+            :file-url="viewer.fileUrl.value"
+            :highlight-query="appStore.viewerHighlightQuery"
+            @go-to-page="viewer.goToPage"
+            @total-pages-resolved="onTotalPagesResolved"
+            class="h-full"
+          />
+          <!-- HTML tab -->
+          <HtmlViewer
+            v-else-if="appStore.viewerActivePageTab === 'html'"
+            :content="viewer.currentPageData.value?.content_html || ''"
+            class="h-full"
+          />
+          <!-- Markdown tab -->
+          <MarkdownViewer
+            v-else-if="appStore.viewerActivePageTab === 'markdown'"
+            :content="viewer.currentPageData.value?.content_markdown || ''"
+            @go-to-page="handleGoToPage"
+            class="h-full"
+          />
+        </template>
+      </template>
 
       <!-- Info panel slide-over -->
       <Transition name="slide">
@@ -227,6 +407,28 @@ onBeforeUnmount(() => {
           <ChevronRight :size="14" />
         </button>
       </div>
+
+      <!-- Go to Page (document mode) / Back to Document (page mode) -->
+      <button
+        v-if="appStore.viewerMode === 'document'"
+        class="flex items-center gap-1 text-xs px-2 py-1 rounded border hover:opacity-80 transition-opacity"
+        style="border-color: var(--color-border); color: var(--color-accent);"
+        @click="appStore.switchToPageMode(viewer.currentPage.value)"
+        title="View current page details"
+      >
+        <FileText :size="12" />
+        Go to Page
+      </button>
+      <button
+        v-else
+        class="flex items-center gap-1 text-xs px-2 py-1 rounded border hover:opacity-80 transition-opacity"
+        style="border-color: var(--color-border); color: var(--color-accent);"
+        @click="appStore.switchToDocumentMode()"
+        title="Back to document view"
+      >
+        <ArrowLeft :size="12" />
+        Back to Document
+      </button>
 
       <!-- Search result navigation -->
       <div v-if="hasSearchResults" class="flex items-center gap-2">
