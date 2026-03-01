@@ -29,8 +29,8 @@ const isImage = computed(() => ['jpeg', 'png', 'bmp', 'tiff'].includes(props.doc
       :file-url="fileUrl"
       :page="currentPage"
       :highlight-query="highlightQuery"
-      @total-pages-resolved="(t: number) => emit('totalPagesResolved', t)"
-      @pdf-page-dimensions="(d: { width: number; height: number }) => emit('pdfPageDimensions', d)"
+      @total-pages-resolved="(t) => emit('totalPagesResolved', t)"
+      @pdf-page-dimensions="(d) => emit('pdfPageDimensions', d)"
     >
       <template #page-overlay="slotProps">
         <slot name="page-overlay" v-bind="slotProps" />
