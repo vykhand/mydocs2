@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from mydocs.backend.dependencies import (
     BatchParseRequest,
@@ -201,13 +201,22 @@ async def get_document_file(document_id: str):
 
     file_path = doc.managed_path or doc.original_path
 
-    # Azure Blob: redirect to SAS URL
+    # Azure Blob: proxy file bytes with correct Content-Type
     if doc.storage_backend == StorageBackendEnum.AZURE_BLOB and file_path:
         storage = get_storage(StorageBackendEnum.AZURE_BLOB)
-        sas_url = await storage.generate_download_url(file_path)
-        if sas_url:
-            return RedirectResponse(url=sas_url, status_code=307)
-        return _error(500, "SAS_GENERATION_FAILED", "Failed to generate download URL")
+        try:
+            file_bytes = await storage.get_file_bytes(file_path)
+        except Exception as e:
+            return _error(500, "BLOB_READ_FAILED", f"Failed to read file from blob storage: {e}")
+        media_type = MIME_MAP.get(doc.file_type, "application/octet-stream")
+        return Response(
+            content=file_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{doc.original_file_name}"',
+                "Cache-Control": "max-age=3600",
+            },
+        )
 
     # Local: serve file directly
     if not file_path or not os.path.isfile(file_path):
@@ -269,14 +278,15 @@ async def get_page_thumbnail(
     if cached:
         # Serve cached thumbnail
         if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
-            sas_url = await storage.generate_download_url(cached["path"])
-            if sas_url:
-                return RedirectResponse(
-                    url=sas_url,
-                    status_code=307,
-                    headers={"Cache-Control": "max-age=3600"},
-                )
-            return _error(500, "SAS_GENERATION_FAILED", "Failed to generate thumbnail download URL")
+            try:
+                thumb_bytes = await storage.get_file_bytes(cached["path"])
+            except Exception as e:
+                return _error(500, "BLOB_READ_FAILED", f"Failed to read thumbnail from blob storage: {e}")
+            return Response(
+                content=thumb_bytes,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "max-age=3600"},
+            )
         else:
             return FileResponse(
                 path=cached["path"],
@@ -331,16 +341,13 @@ async def get_page_thumbnail(
     # 4. Cache the thumbnail to storage
     thumb_path = await storage.write_managed_bytes(document_id, thumb_file_name, thumb_bytes)
 
-    # 5. Serve the generated thumbnail
+    # 5. Serve the generated thumbnail (bytes already in memory)
     if doc.storage_backend == StorageBackendEnum.AZURE_BLOB:
-        sas_url = await storage.generate_download_url(thumb_path)
-        if sas_url:
-            return RedirectResponse(
-                url=sas_url,
-                status_code=307,
-                headers={"Cache-Control": "max-age=3600"},
-            )
-        return _error(500, "SAS_GENERATION_FAILED", "Failed to generate thumbnail download URL")
+        return Response(
+            content=thumb_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "max-age=3600"},
+        )
     else:
         return FileResponse(
             path=thumb_path,
