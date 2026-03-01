@@ -30,12 +30,25 @@ class DocumentParser(ABC):
         """Load existing document state and acquire processing lock."""
         existing = await Document.afind_one({"_id": self.document.id})
         if existing:
+            self._previous_config_hash = existing.parser_config_hash
             self.document = existing
             self.document.parser_config_hash = self.parser_config_hash
             self.document.modified_at = datetime.now()
         else:
+            self._previous_config_hash = None
             self.document.parser_config_hash = self.parser_config_hash
             self.document.created_at = datetime.now()
+
+        # Determine effective cache usage: only use cache when hash is unchanged
+        self._effective_use_cache = self.parser_config.use_cache and (
+            self._previous_config_hash is not None
+            and self._previous_config_hash == self.parser_config_hash
+        )
+        if self.parser_config.use_cache and not self._effective_use_cache:
+            log.warning(
+                f"Config hash changed ({self._previous_config_hash} -> {self.parser_config_hash}), "
+                "cache invalidated"
+            )
 
         if self.document.locked:
             log.warning(f"Document {self.document.id} is already locked.")
@@ -56,6 +69,14 @@ class DocumentParser(ABC):
                 log.error(f"Error during processing document {self.document.id}: {exc_val}")
             else:
                 self.document.status = DocumentStatusEnum.PARSED
+                # Update sidecar with current parser_config_hash
+                try:
+                    from mydocs.sync.sidecar import write_sidecar
+                    from mydocs.parsing.storage import get_storage
+                    storage = get_storage(self.document.storage_backend)
+                    await write_sidecar(self.document, storage)
+                except Exception as e:
+                    log.warning(f"Failed to update sidecar for {self.document.id}: {e}")
             self.document.modified_at = datetime.now()
             log.info(f"Releasing lock on document: {self.document.id}, status: {self.document.status}")
             await self.document.asave()

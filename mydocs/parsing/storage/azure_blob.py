@@ -38,23 +38,8 @@ class AzureBlobStorage(FileStorage):
         self._container_client = self._client.get_container_client(self.container_name)
 
     def _create_client(self):
-        from azure.storage.blob.aio import BlobServiceClient
-
-        if C.AZURE_STORAGE_CONNECTION_STRING:
-            return BlobServiceClient.from_connection_string(C.AZURE_STORAGE_CONNECTION_STRING)
-
-        if C.AZURE_STORAGE_ACCOUNT_NAME:
-            account_url = f"https://{C.AZURE_STORAGE_ACCOUNT_NAME}.blob.core.windows.net"
-            if C.AZURE_STORAGE_ACCOUNT_KEY:
-                return BlobServiceClient(account_url, credential=C.AZURE_STORAGE_ACCOUNT_KEY)
-            # No key — fall back to DefaultAzureCredential (managed identity, Azure CLI, etc.)
-            from azure.identity.aio import DefaultAzureCredential
-            return BlobServiceClient(account_url, credential=DefaultAzureCredential())
-
-        raise ValueError(
-            "Azure Blob Storage requires either AZURE_STORAGE_CONNECTION_STRING "
-            "or AZURE_STORAGE_ACCOUNT_NAME to be set."
-        )
+        from mydocs.parsing.storage.azure_helpers import create_blob_service_client
+        return create_blob_service_client()
 
     def _blob_name_for_doc(self, doc_id: str, source_path: str) -> str:
         """Generate blob name from doc_id and source extension."""

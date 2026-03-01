@@ -30,5 +30,8 @@ AZURE_STORAGE_ACCOUNT_NAME = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME")
 AZURE_STORAGE_ACCOUNT_KEY = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY")
 AZURE_STORAGE_CONTAINER_NAME = os.environ.get("AZURE_STORAGE_CONTAINER_NAME", "managed")
 
+# Azure Blob cache container (for remote cache when using blob backend)
+AZURE_STORAGE_CACHE_CONTAINER_NAME = os.environ.get("AZURE_STORAGE_CACHE_CONTAINER_NAME", "cache")
+
 # Storage backend selection
 STORAGE_BACKEND = os.environ.get("MYDOCS_STORAGE_BACKEND", "local")

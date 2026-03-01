@@ -1,4 +1,3 @@
-import json
 import os
 
 import litellm
@@ -35,13 +34,18 @@ class AzureDIDocumentParser(DocumentParser):
         self._fpath = document.managed_path or document.original_path
         self._storage = get_storage(document.storage_backend)
         self._is_blob = document.storage_backend == StorageBackendEnum.AZURE_BLOB
-        # DI cache stays local for blob-backed files
+
+        # Cache store: remote blob for blob-backed docs, local filesystem otherwise
         if self._is_blob:
-            cache_dir = os.path.join(C.DATA_FOLDER, "cache")
-            os.makedirs(cache_dir, exist_ok=True)
-            self._cache_path = os.path.join(cache_dir, f"{document.id}.di.json")
+            from mydocs.parsing.cache import BlobCacheStore
+            self._cache_store = BlobCacheStore(C.AZURE_STORAGE_CACHE_CONTAINER_NAME)
+            self._cache_key_prefix = document.id
         else:
-            self._cache_path = self._fpath + ".di.json"
+            from mydocs.parsing.cache import LocalCacheStore
+            self._cache_store = LocalCacheStore()
+            self._cache_key_prefix = self._fpath
+
+        self._cache_path = f"{self._cache_key_prefix}.di.json"
         self.client = DocumentIntelligenceClient(
             endpoint=C.AZURE_DI_ENDPOINT,
             credential=AzureKeyCredential(C.AZURE_DI_API_KEY),
@@ -49,7 +53,8 @@ class AzureDIDocumentParser(DocumentParser):
         )
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Close the Azure client and release the document lock."""
+        """Close the Azure client, cache store, and release the document lock."""
+        await self._cache_store.close()
         if self.client:
             await self.client.close()
         return await super().__aexit__(exc_type, exc_val, exc_tb)
@@ -83,11 +88,10 @@ class AzureDIDocumentParser(DocumentParser):
         """Send file to Azure DI or load from cache."""
         log.info(f"Processing file: {os.path.basename(fpath) if not fpath.startswith('az://') else fpath}.")
 
-        json_path = self._cache_path
-        if self.parser_config.use_cache and os.path.exists(json_path):
-            with open(json_path, "r") as j:
-                log.info(f"Document intelligence cached results will be loaded from {json_path}")
-                result = AnalyzeResult(json.load(j))
+        cache_key = self._cache_path
+        if self._effective_use_cache and await self._cache_store.exists(cache_key):
+            log.info(f"Document intelligence cached results will be loaded from {cache_key}")
+            result = AnalyzeResult(await self._cache_store.read_json(cache_key))
         else:
             log.info(f"Parsing file {fpath} with Document Intelligence")
             file_bytes = await self._storage.get_file_bytes(fpath)
@@ -97,9 +101,8 @@ class AzureDIDocumentParser(DocumentParser):
                 **self.parser_config.azure_di_kwargs,
             )
             result = await poller.result()
-            log.info(f"Saving result to {json_path}")
-            with open(json_path, "w") as j:
-                json.dump(result.as_dict(), j)
+            log.info(f"Saving result to {cache_key}")
+            await self._cache_store.write_json(cache_key, result.as_dict())
         return result
 
     async def _aprocess_elements(self) -> list[DocumentElement]:
@@ -214,12 +217,10 @@ class AzureDIDocumentParser(DocumentParser):
     async def _embed_document(self):
         """Generate and store document-level embeddings using litellm."""
         for embedding in self.parser_config.document_embeddings:
-            cache_base = self._cache_path.removesuffix(".di.json")
-            cache_file_name = f"{cache_base}.doc.{embedding.target_field}.json"
-            if self.parser_config.use_cache and os.path.exists(cache_file_name):
-                log.info(f"Loading embeddings from cache: {cache_file_name}")
-                with open(cache_file_name, "r") as f:
-                    embedded_doc = json.load(f)
+            cache_key = f"{self._cache_key_prefix}.doc.{embedding.target_field}.json"
+            if self._effective_use_cache and await self._cache_store.exists(cache_key):
+                log.info(f"Loading embeddings from cache: {cache_key}")
+                embedded_doc = await self._cache_store.read_json(cache_key)
             else:
                 log.info("Embedding document.")
                 text = getattr(self.document, embedding.field_to_embed) or ""
@@ -229,8 +230,7 @@ class AzureDIDocumentParser(DocumentParser):
                 )
                 embedded_doc = [response.data[0]["embedding"]]
                 log.info("Saving embeddings to cache")
-                with open(cache_file_name, "w") as f:
-                    json.dump(embedded_doc, f)
+                await self._cache_store.write_json(cache_key, embedded_doc)
 
             await Document.aupdate_one(
                 filter={"_id": self.document.id},
@@ -245,12 +245,10 @@ class AzureDIDocumentParser(DocumentParser):
             log.warning("No pages to embed. Skipping page embeddings.")
             return
         for embedding in self.parser_config.page_embeddings:
-            cache_base = self._cache_path.removesuffix(".di.json")
-            cache_file_name = f"{cache_base}.pages.{embedding.target_field}.json"
-            if self.parser_config.use_cache and os.path.exists(cache_file_name):
-                log.info(f"Loading embeddings from cache: {cache_file_name}")
-                with open(cache_file_name, "r") as f:
-                    emb_dict = json.load(f)
+            cache_key = f"{self._cache_key_prefix}.pages.{embedding.target_field}.json"
+            if self._effective_use_cache and await self._cache_store.exists(cache_key):
+                log.info(f"Loading embeddings from cache: {cache_key}")
+                emb_dict = await self._cache_store.read_json(cache_key)
             else:
                 log.info("Embedding pages.")
                 pages_to_embed = [p for p in self.pages if getattr(p, embedding.field_to_embed)]
@@ -265,8 +263,7 @@ class AzureDIDocumentParser(DocumentParser):
                 embeddings = [item["embedding"] for item in response.data]
                 emb_dict = {p.id: emb for p, emb in zip(pages_to_embed, embeddings)}
                 log.info("Saving embeddings to cache")
-                with open(cache_file_name, "w") as f:
-                    json.dump(emb_dict, f)
+                await self._cache_store.write_json(cache_key, emb_dict)
 
             for page_id, vector in emb_dict.items():
                 log.info(f"Updating page {page_id} with embedding vector, len: {len(vector)}")

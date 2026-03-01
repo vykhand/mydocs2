@@ -598,16 +598,60 @@ A database abstraction layer should be designed to allow swapping backends. The 
 
 The parsing engine supports caching at multiple levels to avoid redundant processing:
 
-| Cache | Location | Description |
-|-------|----------|-------------|
-| **DI Results** | `<filepath>.di.json` | Raw Azure DI response, avoids re-calling the API |
-| **Document Embeddings** | `<filepath>.doc.<field>.json` | Cached embedding vectors for document |
-| **Page Embeddings** | `<filepath>.pages.<field>.json` | Cached embedding vectors for pages |
+| Cache | Key Pattern | Description |
+|-------|-------------|-------------|
+| **DI Results** | `{prefix}.di.json` | Raw Azure DI response, avoids re-calling the API |
+| **Document Embeddings** | `{prefix}.doc.{target_field}.json` | Cached embedding vectors for document |
+| **Page Embeddings** | `{prefix}.pages.{target_field}.json` | Cached embedding vectors for pages |
 
-Caching is controlled by the `use_cache` flag in `ParserConfig`. When enabled:
-- Before calling Azure DI, check for cached `.di.json` file
-- Before computing embeddings, check for cached embedding JSON files
+Where `{prefix}` is the filesystem path (local backend) or the document ID (blob backend).
+
+### 9.1 Cache Store Abstraction
+
+Cache I/O is handled by a `CacheStore` abstraction (`mydocs/parsing/cache.py`) with two implementations:
+
+| Implementation | Backend | Description |
+|----------------|---------|-------------|
+| `LocalCacheStore` | Local filesystem | Reads/writes JSON files on disk |
+| `BlobCacheStore` | Azure Blob Storage | Reads/writes JSON blobs in a dedicated cache container |
+
+When `storage_backend == azure_blob`, the parser uses `BlobCacheStore` pointing at the container specified by `AZURE_STORAGE_CACHE_CONTAINER_NAME` (default: `cache`). This ensures cache persists across stateless/multi-node deployments. For local backends, `LocalCacheStore` is used with the same filesystem paths as before.
+
+Cache write failures in `BlobCacheStore` are caught and logged (non-fatal) — parsing does not fail because cache could not be saved.
+
+### 9.2 Config Hash-Based Cache Invalidation
+
+Caching is controlled by the `use_cache` flag in `ParserConfig`, combined with config hash comparison. The effective cache usage is determined by:
+
+```
+effective_use_cache = use_cache AND (previous_config_hash == current_config_hash)
+```
+
+On parser entry (`__aenter__`), the base parser:
+1. Loads the existing document from the database
+2. Captures the previous `parser_config_hash`
+3. Computes `_effective_use_cache` by comparing the previous hash to the current one
+4. Logs a warning when cache is invalidated due to config change
+
+**Edge cases**:
+- **First parse** (`previous_config_hash=None`): cache not used (nothing cached yet)
+- **Same hash**: cache used normally (no regression)
+- **`use_cache=False`**: `_effective_use_cache=False` regardless of hash
+
+When `_effective_use_cache` is true:
+- Before calling Azure DI, check for cached `.di.json` entry
+- Before computing embeddings, check for cached embedding JSON entries
 - Cached data is loaded directly, skipping the API call
+
+### 9.3 Sidecar Update After Parsing
+
+After parsing completes successfully, the base parser writes an updated metadata sidecar via `write_sidecar()`. This ensures the sidecar's `parser_config_hash` reflects the config that was actually used to parse the document, enabling the sync module to detect stale sidecars.
+
+### 9.4 Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_STORAGE_CACHE_CONTAINER_NAME` | `cache` | Azure Blob container for remote cache storage |
 
 ---
 
