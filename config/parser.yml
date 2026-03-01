@@ -1,6 +1,6 @@
 azure_di_model: prebuilt-layout
 azure_di_kwargs:
-  output_content_format: markdown
+  output_content_format: text
   features:
     - keyValuePairs
 use_cache: true
