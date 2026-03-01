@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   totalPagesResolved: [total: number]
+  pdfPageDimensions: [dims: { width: number; height: number }]
 }>()
 
 const containerRef = ref<HTMLDivElement>()
@@ -22,6 +23,16 @@ watch(pdfPages, (total) => {
 })
 
 const currentPage = computed(() => Math.min(Math.max(1, props.page), pdfPages.value || 1))
+
+// Emit native page dimensions from pdfjs when page is rendered
+function onPdfLoaded(viewport: { width: number; height: number; scale: number }) {
+  if (viewport && viewport.scale) {
+    emit('pdfPageDimensions', {
+      width: viewport.width / viewport.scale / 72,
+      height: viewport.height / viewport.scale / 72,
+    })
+  }
+}
 
 // Debounced resize observer to reload PDF when container width changes
 let resizeTimer: ReturnType<typeof setTimeout> | undefined
@@ -57,9 +68,23 @@ onBeforeUnmount(() => {
           text-layer
           annotation-layer
           :highlight-text="highlightQuery || undefined"
-        />
-        <!-- Annotation overlay layer for future extraction result annotations -->
-        <div class="absolute inset-0 pointer-events-none" data-annotation-overlay />
+          @loaded="onPdfLoaded"
+        >
+          <template #overlay="{ width, height }">
+            <!-- Wrapper with explicit pixel dimensions matching the rendered canvas.
+                 VuePDF's .page container sizes from ALL children (text/annotation layers
+                 are in normal flow, not absolutely positioned), so inset-0 on the overlay
+                 would be larger than the canvas. This wrapper constrains the overlay to
+                 the exact canvas area. -->
+            <div
+              v-if="width && height"
+              class="absolute top-0 left-0 pointer-events-none"
+              :style="{ width: Math.floor(width) + 'px', height: Math.floor(height) + 'px' }"
+            >
+              <slot name="page-overlay" :width="width" :height="height" />
+            </div>
+          </template>
+        </VuePDF>
       </div>
     </div>
   </div>

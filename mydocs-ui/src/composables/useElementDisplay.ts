@@ -5,6 +5,7 @@ export function useElementDisplay(
   elements: Ref<DocumentElement[] | undefined>,
   pages: Ref<DocumentPage[]>,
   currentPage: Ref<number>,
+  pdfPageDims?: Ref<{ width: number; height: number } | null>,
 ) {
   const pageElements = computed<DocumentElement[]>(() => {
     if (!elements.value) return []
@@ -12,6 +13,11 @@ export function useElementDisplay(
   })
 
   const currentPageDimensions = computed(() => {
+    // Prefer pdfjs native dimensions (guaranteed to match the rendered page)
+    if (pdfPageDims?.value) {
+      return { width: pdfPageDims.value.width, height: pdfPageDims.value.height, unit: 'inch' }
+    }
+    // Fall back to stored page dimensions from Azure DI
     const page = pages.value.find(p => p.page_number === currentPage.value)
     if (!page || !page.width || !page.height) return null
     return { width: page.width, height: page.height, unit: page.unit || 'inch' }
@@ -70,6 +76,7 @@ export function useElementDisplay(
     if (!dims) return []
 
     const result: ElementAnnotation[] = []
+    let debugged = false
 
     for (const el of pageElements.value) {
       const regions = extractRegions(el)
@@ -88,6 +95,21 @@ export function useElementDisplay(
         maxX = Math.max(maxX, ...xs)
         minY = Math.min(minY, ...ys)
         maxY = Math.max(maxY, ...ys)
+
+        // Debug: log first element's raw data
+        if (!debugged) {
+          console.debug('[ElementDisplay] pageDims:', dims,
+            'pdfOverride:', pdfPageDims?.value,
+            'polygon:', polygon,
+            'bbox:', { minX, minY, maxX, maxY },
+            'pct:', {
+              left: (minX / dims.width * 100).toFixed(1),
+              top: (minY / dims.height * 100).toFixed(1),
+            },
+            'content:', el.element_data?.content?.substring(0, 50) || el.short_id,
+          )
+          debugged = true
+        }
       }
 
       result.push({

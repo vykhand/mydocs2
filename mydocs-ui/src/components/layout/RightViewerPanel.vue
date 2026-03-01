@@ -111,9 +111,14 @@ const searchResultLabel = computed(() => {
   return `Result ${appStore.viewerCurrentResultIndex + 1} of ${appStore.viewerSearchResults.length}`
 })
 
-// Element display
+// Element display — use pdfjs native page dimensions for accurate overlay alignment
 const elementsRef = computed(() => viewer.document.value?.elements || [])
-const { annotations } = useElementDisplay(elementsRef, viewer.pages, viewer.currentPage)
+const pdfPageDims = ref<{ width: number; height: number } | null>(null)
+const { annotations } = useElementDisplay(elementsRef, viewer.pages, viewer.currentPage, pdfPageDims)
+
+function onPdfPageDimensions(dims: { width: number; height: number }) {
+  pdfPageDims.value = dims
+}
 
 const hasElements = computed(() => (viewer.document.value?.elements?.length || 0) > 0)
 
@@ -230,23 +235,25 @@ onBeforeUnmount(() => {
             class="h-full"
           >
             <template #first>
-              <div class="relative h-full">
-                <DocumentViewer
-                  :document="viewer.document.value"
-                  :current-page="viewer.currentPage.value"
-                  :zoom="viewer.zoom.value"
-                  :file-url="viewer.fileUrl.value"
-                  :highlight-query="appStore.viewerHighlightQuery"
-                  @go-to-page="viewer.goToPage"
-                  @total-pages-resolved="onTotalPagesResolved"
-                  class="h-full"
-                />
-                <ElementAnnotationOverlay
-                  :annotations="annotations"
-                  :active-element-id="appStore.activeElementId"
-                  @select="handleElementSelect"
-                />
-              </div>
+              <DocumentViewer
+                :document="viewer.document.value"
+                :current-page="viewer.currentPage.value"
+                :zoom="viewer.zoom.value"
+                :file-url="viewer.fileUrl.value"
+                :highlight-query="appStore.viewerHighlightQuery"
+                @go-to-page="viewer.goToPage"
+                @total-pages-resolved="onTotalPagesResolved"
+                @pdf-page-dimensions="onPdfPageDimensions"
+                class="h-full"
+              >
+                <template #page-overlay>
+                  <ElementAnnotationOverlay
+                    :annotations="annotations"
+                    :active-element-id="appStore.activeElementId"
+                    @select="handleElementSelect"
+                  />
+                </template>
+              </DocumentViewer>
             </template>
             <template #second>
               <ElementBrowser

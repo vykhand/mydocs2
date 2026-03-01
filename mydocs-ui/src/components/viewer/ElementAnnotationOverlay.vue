@@ -41,7 +41,7 @@ function onMouseLeave() {
 </script>
 
 <template>
-  <div class="absolute inset-0 pointer-events-none">
+  <div class="absolute inset-0 pointer-events-none z-10">
     <div
       v-for="ann in annotations"
       :key="ann.elementId"

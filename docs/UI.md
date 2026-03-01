@@ -52,10 +52,15 @@ The old `PdfViewer.vue` (raw PDF.js canvas) has been replaced by `VuePdfViewer.v
 | `components/viewer/VuePdfViewer.vue` | @tato30/vue-pdf PDF viewer with annotation overlay layer |
 | `components/viewer/MarkdownViewer.vue` | Markdown rendered/raw viewer |
 | `components/viewer/HtmlViewer.vue` | HTML rendered/raw viewer |
-| `components/viewer/PageImageViewer.vue` | Page image viewer with zoom |
+| `components/viewer/PageImageViewer.vue` | Page image viewer with zoom (retained but no longer used in page mode tabs) |
+| `components/viewer/ElementAnnotationOverlay.vue` | Color-coded element annotations for Display Elements |
+| `components/viewer/ElementBrowser.vue` | Grouped element list with navigation |
+| `components/viewer/ElementCard.vue` | Individual element card in browser |
+| `components/viewer/SplitViewContainer.vue` | Generic resizable split container |
 | `components/search/PageResultCard.vue` | Page search result card with thumbnail |
 | `components/search/PageResultsGrid.vue` | Grid/list container for page search results |
 | `composables/useMarkdownRenderer.ts` | markdown-it wrapper |
+| `composables/useElementDisplay.ts` | Element display logic for Display Elements feature |
 | `utils/format.ts` | formatFileSize, getDisplayStatus utilities |
 
 #### File count comparison
@@ -69,10 +74,10 @@ The old `PdfViewer.vue` (raw PDF.js canvas) has been replaced by `VuePdfViewer.v
 | `components/upload/` | 3 files | 3 files | Match |
 | `components/documents/` | 5 files | 5 files | Match |
 | `components/search/` | 5 files | 5 files | Match |
-| `components/viewer/` | 6 files | 6 files | Match |
+| `components/viewer/` | 10 files | 10 files | Match |
 | `components/cases/` | 4 files | 4 files | Match |
 | `stores/` | 6 files | 6 files | Match |
-| `composables/` | 5 files | 5 files | Match |
+| `composables/` | 6 files | 6 files | Match |
 | `api/` | 6 files | 6 files | Match |
 | `auth/` | 2 files | 2 files | Match |
 | `router/` | 1 file | 1 file | Match |
@@ -193,14 +198,14 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 
 The viewer now operates in two modes:
 - **Document mode** — opened from document cards. Has PDF and Markdown tabs.
-- **Page mode** — opened from search results. Has Page View, HTML, and Markdown tabs.
+- **Page mode** — opened from search results. Has PDF, HTML, and Markdown tabs.
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
 | Resizable side panel | 300px – 75% viewport, default 420px | RightViewerPanel with mouse-drag resize | Match |
 | Panel header | Doc name + Info, Maximize, Close buttons | Header with doc name, info toggle, close | Match |
-| Tab bar | Document mode: PDF + Markdown; Page mode: Page View + HTML + Markdown | Tab bar below header, switches based on viewerMode | Match |
-| Tab content | Routes to appropriate viewer component | VuePdfViewer, MarkdownViewer, HtmlViewer, PageImageViewer | Match |
+| Tab bar | Document mode: PDF + Markdown; Page mode: PDF + HTML + Markdown | Tab bar below header, switches based on viewerMode | Match |
+| Tab content | Routes to appropriate viewer component | DocumentViewer (VuePdfViewer), MarkdownViewer, HtmlViewer | Match |
 | Info panel slide-over | Toggled by info button; metadata, tags, duplicates, advanced | Slide-over panel with metadata, tags, duplicates, advanced | Match |
 | Bottom toolbar | Page nav + mode indicator + search result nav | Implemented with page mode badge (click to switch back to document mode) | Match |
 | Tablet/mobile: full-screen overlay | Fixed position, z-50 | Responsive behavior implemented | Match |
@@ -226,7 +231,7 @@ The viewer now operates in two modes:
 
 | Element | Spec | Actual | Status |
 |---|---|---|---|
-| Page View tab | High-res page image from thumbnail endpoint with zoom | PageImageViewer using getPageThumbnailUrl(width=1200) | Match |
+| PDF tab | Same VuePdfViewer as document mode, jumped to specific page | DocumentViewer with current-page and highlight-query props | Match |
 | HTML tab | page.content_html with rendered/raw toggle | HtmlViewer component | Match |
 | Markdown tab | page.content_markdown with rendered/raw toggle | MarkdownViewer component | Match |
 
@@ -244,6 +249,18 @@ The viewer now operates in two modes:
 | Download | Downloads original file | Present in ViewerToolbar | Match |
 | Fullscreen | Browser fullscreen mode | Present in ViewerToolbar | Match |
 | Close | Closes viewer panel | Present in ViewerToolbar | Match |
+
+#### Display Elements Feature
+
+| Element | Spec | Actual | Status |
+|---|---|---|---|
+| Layers toggle button | In viewer header, visible when document has elements | Layers icon button next to Info, conditionally shown | Match |
+| Split view (normal) | Horizontal split: top=PDF+annotations, bottom=element browser | SplitViewContainer with direction='horizontal' | Match |
+| Split view (expanded) | Panel expands, vertical split: left=PDF, right=browser | SplitViewContainer with direction='vertical', panel width override | Match |
+| Annotation overlay | Color-coded boxes over PDF with tooltip and click navigation | ElementAnnotationOverlay with per-type colors | Match |
+| Element browser | Grouped by type, collapsible groups, element cards | ElementBrowser with type groups and ElementCard components | Match |
+| Bidirectional navigation | Click annotation ↔ highlight in browser, cross-page navigation | handleElementSelect navigates page and sets activeElementId | Match |
+| Expand/collapse button | Maximize2/Minimize2 when elements active | Button toggles elementsDisplayExpanded in store | Match |
 
 ### 5.4 Tags Management
 
@@ -321,9 +338,12 @@ The viewer now operates in two modes:
 | viewerCurrentResultIndex | number | number | Match |
 | viewerMode | `'document' \| 'page'` | `ViewerMode` type | Match |
 | viewerActiveDocumentTab | `'pdf' \| 'markdown'` | `DocumentViewerTab` type | Match |
-| viewerActivePageTab | `'page-view' \| 'html' \| 'markdown'` | `PageViewerTab` type | Match |
+| viewerActivePageTab | `'pdf' \| 'html' \| 'markdown'` | `PageViewerTab` type | Match |
+| elementsDisplayActive | boolean | boolean | Match |
+| elementsDisplayExpanded | boolean | boolean | Match |
+| activeElementId | `string \| null` | `string \| null` | Match |
 
-Additional methods: `switchToPageMode(page)`, `switchToDocumentMode()`.
+Additional methods: `switchToPageMode(page)`, `switchToDocumentMode()`, `toggleElementsDisplay()`, `toggleElementsExpanded()`, `setActiveElement(id)`.
 
 Persistence: `['mode', 'theme', 'sidebarCollapsed', 'activeTab', 'galleryViewMode']` — covers all spec requirements.
 
@@ -417,6 +437,15 @@ Accepts both string and `Ref<string | null>` for documentId — **matches spec**
 | Member | Spec | Actual | Match |
 |---|---|---|---|
 | render(markdown) | Returns HTML string | Uses markdown-it to render | Match |
+
+### 7.7 `useElementDisplay(elements, pages, currentPage)`
+
+| Member | Spec | Actual | Match |
+|---|---|---|---|
+| pageElements | `Computed<DocumentElement[]>` | `ComputedRef<DocumentElement[]>` | Match |
+| currentPageDimensions | `Computed<{ width, height, unit } \| null>` | `ComputedRef` | Match |
+| annotations | `Computed<ElementAnnotation[]>` | `ComputedRef<ElementAnnotation[]>` | Match |
+| pageElementsByType | `Computed<Record<string, DocumentElement[]>>` | `ComputedRef` | Match |
 
 ### 7.3 `useHighlights(elements, pageNumber, searchContent?)`
 
@@ -548,7 +577,7 @@ Fonts loaded via Google Fonts in `index.html`:
 | # | Area | Description | Spec Section |
 |---|---|---|---|
 | M1 | Pinch-to-zoom | Touch device pinch-to-zoom for PDF viewer not implemented. | 3.3 |
-| M2 | Element annotations | Annotation overlay layer exists in VuePdfViewer (positioned div), but no annotation rendering yet. | 3.3 |
+| ~~M2~~ | ~~Element annotations~~ | **Implemented**: Display Elements feature with `ElementAnnotationOverlay`, `ElementBrowser`, and `useElementDisplay` composable. | 3.8 |
 | M3 | Image highlight overlay | Bounding-box highlights for image documents not implemented. | 3.3 |
 | M4 | Virtual scrolling | No virtual scrolling for long document or search result lists. | 10 |
 | M5 | Lazy route loading | Routes use direct imports instead of lazy-loaded dynamic imports. | 5 / 10 |
@@ -621,6 +650,21 @@ These user stories reflect what is **actually working** in the current codebase,
 | US-VIEW-14 | As a user, I can jump to a page using the thumbnail sidebar page numbers. | Working (numbers only, not thumbnails) |
 | US-VIEW-15 | As a user, I can edit tags on a document from the viewer info panel. | Not Working (read-only display) |
 
+### Display Elements
+
+| ID | Story | Status |
+|---|---|---|
+| US-ELEM-1 | As a user, I can toggle the Display Elements feature via a Layers icon button in the viewer header. | Working |
+| US-ELEM-2 | As a user, I can see color-coded annotations overlaid on the PDF for paragraphs (blue), tables (green), key-value pairs (purple), images (yellow), and barcodes (red). | Working |
+| US-ELEM-3 | As a user, I can hover over an annotation to see a tooltip with element type, short_id, and content preview. | Working |
+| US-ELEM-4 | As a user, I can click an annotation to highlight the corresponding card in the element browser. | Working |
+| US-ELEM-5 | As a user, I can click an element card in the browser to highlight and scroll to the corresponding annotation on the PDF. | Working |
+| US-ELEM-6 | As a user, when clicking an element on a different page, the viewer navigates to that page first. | Working |
+| US-ELEM-7 | As a user, I can expand the elements view to a wider vertical split layout. | Working |
+| US-ELEM-8 | As a user, I can toggle "All pages" in the element browser to see elements across all pages. | Working |
+| US-ELEM-9 | As a user, I can collapse/expand element type groups in the browser. | Working |
+| US-ELEM-10 | As a user, the Layers button is hidden when a document has no elements. | Working |
+
 ### Search
 
 | ID | Story | Status |
@@ -691,4 +735,4 @@ These user stories reflect what is **actually working** in the current codebase,
 1. **Feature parity gap** — The UploadModal and SettingsDrawer are simpler than the legacy views were. Need to add storage mode, parse-after-upload, and search defaults.
 2. **Performance features** — Virtual scrolling and lazy route loading are specified but not implemented.
 3. **Tag editing in viewer** — Tags are displayed read-only in the info panel. Users must leave the viewer context to manage tags.
-4. **Annotation rendering** — The overlay layer exists in VuePdfViewer but does not yet render annotation boxes from extraction results.
+4. **Annotation rendering** — The Display Elements feature now renders color-coded element annotations via `ElementAnnotationOverlay` with a companion `ElementBrowser` for bidirectional navigation.

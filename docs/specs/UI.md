@@ -248,7 +248,7 @@ Opening a document (via gallery click or navigating to `/doc/:id`) sets `viewerO
 +------------------------------------------+
 | Tab bar:                                  |
 |   Document mode: [PDF] [Markdown]         |
-|   Page mode: [Page View] [HTML] [Markdown]|
+|   Page mode: [PDF] [HTML] [Markdown]       |
 +------------------------------------------+
 |                                          |
 |          Tab Content (full height)        |
@@ -263,7 +263,7 @@ Opening a document (via gallery click or navigating to `/doc/:id`) sets `viewerO
 |----------------------|-------------|
 | Resize handle        | 6px-wide draggable area on the left edge. Changes cursor to `col-resize`. Panel width clamped to 300px – 75% viewport. |
 | Header               | Document file name (truncated) with Info toggle, Maximize, and Close buttons. |
-| Tab bar              | Below header. Shows tabs based on `viewerMode`: Document mode shows PDF + Markdown; Page mode shows Page View + HTML + Markdown. |
+| Tab bar              | Below header. Shows tabs based on `viewerMode`: Document mode shows PDF + Markdown; Page mode shows PDF + HTML + Markdown. |
 | Tab content          | Routes to the appropriate viewer component based on mode + active tab. Fills the full vertical space between tab bar and bottom toolbar (`flex-1 min-h-0`). |
 | Info panel           | Slide-over panel on the right side of the viewer, toggled by the Info button in the header. Contains metadata, tags, duplicates, and advanced sections. Absolutely positioned overlay, scrollable. |
 | Bottom toolbar       | Always visible (`shrink-0`). Page navigation (Prev/Next + "Page N / Total") on the left. Search result navigation ("Result X of Y" + Prev/Next) on the right when opened from search. |
@@ -291,13 +291,13 @@ On tablet and mobile, the viewer opens as a **full-screen overlay** (fixed posit
 
 #### Page Mode Tabs
 
-**Page View Tab** (`PageImageViewer`):
+**PDF Tab** (`DocumentViewer` / `VuePdfViewer`):
 
 | Element             | Description |
 |---------------------|-------------|
-| Page image          | Full-resolution page image from the thumbnail endpoint (high-res width). |
-| Zoom controls       | Scroll wheel zoom and pan support. |
-| Search highlight    | Overlay for search term highlight positioning. |
+| Vue PDF component   | Same `VuePdfViewer` as document mode, jumped to the specific page via `current-page` prop. |
+| Search highlighting | Uses the built-in `highlight-text` prop for search term highlighting. |
+| Page navigation     | Shared page navigation from bottom toolbar. |
 
 **HTML Tab** (`HtmlViewer`):
 
@@ -427,6 +427,42 @@ Global keyboard shortcuts registered via the `useKeyboardShortcuts` composable:
 | `/`                  | Focus the search bar (when no input is focused). |
 | `Escape`             | Close the document viewer panel if open. |
 
+### 3.8 Display Elements
+
+The Display Elements feature allows users to visualize document elements (paragraphs, tables, key-value pairs, images, barcodes) as color-coded annotations overlaid on the PDF viewer, with a companion element browser panel for navigation.
+
+#### Toggle & Layout
+
+| Element              | Description |
+|----------------------|-------------|
+| Toggle button        | `Layers` icon button in the viewer header, next to the Info button. Only visible when `document.elements?.length > 0`. Highlighted when active. |
+| Normal mode          | Horizontal split (top: PDF + annotation overlay, bottom: element browser). Uses `SplitViewContainer` with `direction='horizontal'`. |
+| Expanded mode        | Viewer panel expands to 70% of viewport width. Vertical split (left: PDF + annotations, right: element browser). Toggle via `Maximize2`/`Minimize2` button shown when elements are active. |
+
+#### Annotation Overlay (`ElementAnnotationOverlay`)
+
+| Element              | Description |
+|----------------------|-------------|
+| Positioning          | `position: absolute; inset: 0; pointer-events: none` container over the PDF, with individual `pointer-events: auto` boxes. Same approach as `HighlightOverlay`. |
+| Element colors       | `paragraph`: blue (`rgba(59,130,246,0.25)`), `table`: green (`rgba(34,197,94,0.25)`), `key_value_pair`: purple (`rgba(168,85,247,0.25)`), `image`: yellow (`rgba(234,179,8,0.25)`), `barcode`: red (`rgba(239,68,68,0.25)`). |
+| Active element       | Gets box-shadow highlight; other elements dim to 0.3 opacity. |
+| Tooltip              | On mouseenter: fixed-positioned div near cursor showing element type label, `short_id`, and content preview (first 120 chars). |
+| Click                | Emits `select(elementId)` for bidirectional navigation with the element browser. |
+
+#### Element Browser (`ElementBrowser`)
+
+| Element              | Description |
+|----------------------|-------------|
+| Header               | "All pages" toggle checkbox and element count. |
+| Groups               | Elements grouped by type with colored indicator dots, type labels, counts. Collapsible via chevron toggle. |
+| Element cards        | `ElementCard` showing `short_id`, page number badge, content preview (line-clamp-2). Active card gets colored ring border and `scrollIntoView`. |
+| Navigation           | Click card → emits `select(elementId)` + `go-to-page(pageNumber)` if on different page. |
+
+#### Bidirectional Navigation
+
+- Click annotation on PDF → corresponding card scrolls into view and highlights in browser.
+- Click card in browser → annotation highlights on PDF; if on a different page, viewer navigates to that page first.
+
 ## 4. Component Architecture
 
 ### 4.1 Directory Structure
@@ -521,6 +557,10 @@ mydocs-ui/
         PageImageViewer.vue          # Page image viewer with zoom (used in page mode)
         ImageViewer.vue              # Zoomable image (for image file types)
         HighlightOverlay.vue         # Bounding box highlights
+        ElementAnnotationOverlay.vue # Color-coded element annotations for Display Elements
+        ElementBrowser.vue           # Grouped element list with navigation
+        ElementCard.vue              # Individual element card in browser
+        SplitViewContainer.vue       # Generic resizable split container
         ThumbnailSidebar.vue
         ViewerToolbar.vue
       cases/
@@ -533,6 +573,7 @@ mydocs-ui/
       useDocumentViewer.ts           # Document/page data loading, page navigation, file URL
       useMarkdownRenderer.ts         # markdown-it wrapper with code highlighting
       useHighlights.ts              # Compute highlight rects from elements
+      useElementDisplay.ts           # Element display logic for Display Elements feature
       useKeyboardShortcuts.ts        # Global keyboard shortcut handler
       useResponsive.ts               # Breakpoint-aware reactive state (4 breakpoints)
     utils/
@@ -609,6 +650,24 @@ Computes highlight rectangles by:
 2. Finding `DocumentElement` entries on the current page whose text overlaps with the matched content.
 3. Extracting bounding region polygons from `element_data`.
 4. Converting polygon coordinates to page-relative rectangles scaled to the current zoom level.
+
+#### `useElementDisplay(elements, pages, currentPage)`
+
+```typescript
+interface UseElementDisplay {
+  pageElements: Computed<DocumentElement[]>           // Elements filtered to current page
+  currentPageDimensions: Computed<{ width: number; height: number; unit: string } | null>
+  annotations: Computed<ElementAnnotation[]>          // Percentage-based positions from bounding regions
+  pageElementsByType: Computed<Record<string, DocumentElement[]>>  // Grouped by type
+}
+```
+
+Computes element annotations by:
+1. Filtering elements to the current page.
+2. Extracting bounding region polygons from `element_data.boundingRegions`.
+3. For key-value pairs: unioning `element_data.key.boundingRegions` + `element_data.value.boundingRegions`.
+4. Converting polygon coordinates to percentage-based positions (`minX / pageWidth * 100`).
+5. Generating content previews: KV → `"key: value"`, Table → `"Table: NxM"`, Others → first 120 chars.
 
 #### `useKeyboardShortcuts()`
 
