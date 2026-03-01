@@ -24,6 +24,15 @@ AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_API_BASE = os.environ.get("AZURE_OPENAI_API_BASE")
 AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
 
+# LiteLLM reads AZURE_API_BASE / AZURE_API_KEY / AZURE_API_VERSION from env.
+# Mirror our variables so litellm.acompletion() picks them up automatically.
+if AZURE_OPENAI_API_BASE:
+    os.environ.setdefault("AZURE_API_BASE", AZURE_OPENAI_API_BASE)
+if AZURE_OPENAI_API_KEY:
+    os.environ.setdefault("AZURE_API_KEY", AZURE_OPENAI_API_KEY)
+if AZURE_OPENAI_API_VERSION:
+    os.environ.setdefault("AZURE_API_VERSION", AZURE_OPENAI_API_VERSION)
+
 # Azure Blob Storage (managed backend)
 AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_STORAGE_ACCOUNT_NAME = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME")
