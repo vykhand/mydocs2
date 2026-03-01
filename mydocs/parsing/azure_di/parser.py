@@ -121,6 +121,11 @@ class AzureDIDocumentParser(DocumentParser):
                 if typ == DocumentElementTypeEnum.KEY_VALUE_PAIR:
                     first_bbox = el.key.bounding_regions[0]
                     first_span = el.key.spans[0] if el.key.spans else el.value.spans[0]
+                elif typ == DocumentElementTypeEnum.PARAGRAPH:
+                    if not el.content:
+                        continue
+                    first_bbox = el.bounding_regions[0]
+                    first_span = el.spans[0]
                 else:
                     first_bbox = el.bounding_regions[0]
                     first_span = el.spans[0]
@@ -236,6 +241,9 @@ class AzureDIDocumentParser(DocumentParser):
 
     async def _embed_pages(self):
         """Generate and store page-level embeddings using litellm."""
+        if not self.pages:
+            log.warning("No pages to embed. Skipping page embeddings.")
+            return
         for embedding in self.parser_config.page_embeddings:
             cache_base = self._cache_path.removesuffix(".di.json")
             cache_file_name = f"{cache_base}.pages.{embedding.target_field}.json"
@@ -245,13 +253,17 @@ class AzureDIDocumentParser(DocumentParser):
                     emb_dict = json.load(f)
             else:
                 log.info("Embedding pages.")
-                texts = [getattr(p, embedding.field_to_embed) or "" for p in self.pages]
+                pages_to_embed = [p for p in self.pages if getattr(p, embedding.field_to_embed)]
+                if not pages_to_embed:
+                    log.warning(f"No pages with non-empty {embedding.field_to_embed}. Skipping.")
+                    continue
+                texts = [getattr(p, embedding.field_to_embed) for p in pages_to_embed]
                 response = await litellm.aembedding(
                     model=embedding.model,
                     input=texts,
                 )
                 embeddings = [item["embedding"] for item in response.data]
-                emb_dict = {p.id: emb for p, emb in zip(self.pages, embeddings)}
+                emb_dict = {p.id: emb for p, emb in zip(pages_to_embed, embeddings)}
                 log.info("Saving embeddings to cache")
                 with open(cache_file_name, "w") as f:
                     json.dump(emb_dict, f)
