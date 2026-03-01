@@ -3,10 +3,10 @@ import type { Document } from '@/types'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
 import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
-import { getPageThumbnailUrl } from '@/api/documents'
+import { fetchPageThumbnailBlob } from '@/api/documents'
 import { formatFileSize, getDisplayStatus } from '@/utils/format'
 import { FileText, Files, Layers, Check } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 
 const props = withDefaults(defineProps<{
   document: Document
@@ -21,8 +21,20 @@ const emit = defineEmits<{
   toggleSelect: []
 }>()
 
-const thumbnailUrl = computed(() => getPageThumbnailUrl(props.document.id, 1, 600))
+const thumbnailUrl = ref('')
 const displayStatus = computed(() => getDisplayStatus(props.document))
+
+onMounted(async () => {
+  try {
+    thumbnailUrl.value = await fetchPageThumbnailBlob(props.document.id, 1, 600)
+  } catch {
+    // Thumbnail not available — fallback icon will show
+  }
+})
+
+onBeforeUnmount(() => {
+  if (thumbnailUrl.value) URL.revokeObjectURL(thumbnailUrl.value)
+})
 const pageCount = computed(() => props.document.file_metadata?.page_count ?? 0)
 const subDocCount = computed(() => props.document.subdocuments?.length ?? 0)
 const fileSize = computed(() => formatFileSize(props.document.file_metadata?.size_bytes))

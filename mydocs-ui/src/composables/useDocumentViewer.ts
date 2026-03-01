@@ -1,5 +1,5 @@
-import { ref, onMounted, watch, isRef, type Ref } from 'vue'
-import { getDocument, getPages, getPage, getDocumentFileUrl } from '@/api/documents'
+import { ref, onMounted, onBeforeUnmount, watch, isRef, type Ref } from 'vue'
+import { getDocument, getPages, getPage, fetchDocumentFileBlob } from '@/api/documents'
 import type { Document, DocumentPage } from '@/types'
 
 export function useDocumentViewer(documentId: string | Ref<string | null>, initialPage = 1) {
@@ -12,17 +12,25 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
   const currentPageData = ref<DocumentPage | null>(null)
 
   const resolveId = () => isRef(documentId) ? documentId.value : documentId
-  const fileUrl = ref(resolveId() ? getDocumentFileUrl(resolveId()!) : '')
+  const fileUrl = ref('')
+
+  function revokeFileUrl() {
+    if (fileUrl.value) {
+      URL.revokeObjectURL(fileUrl.value)
+      fileUrl.value = ''
+    }
+  }
 
   async function loadDocument() {
     const id = resolveId()
     if (!id) return
     loading.value = true
-    fileUrl.value = getDocumentFileUrl(id)
+    revokeFileUrl()
     try {
       document.value = await getDocument(id)
       pages.value = await getPages(id)
       totalPages.value = document.value.file_metadata?.page_count || pages.value.length || 1
+      fileUrl.value = await fetchDocumentFileBlob(id)
     } finally {
       loading.value = false
     }
@@ -71,11 +79,14 @@ export function useDocumentViewer(documentId: string | Ref<string | null>, initi
         currentPage.value = 1
         currentPageData.value = null
         loadDocument()
+      } else {
+        revokeFileUrl()
       }
     })
   }
 
   onMounted(loadDocument)
+  onBeforeUnmount(revokeFileUrl)
 
   return {
     document,
