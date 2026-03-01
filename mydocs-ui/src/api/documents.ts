@@ -110,7 +110,10 @@ export function getPageThumbnailUrl(documentId: string, pageNumber: number, widt
  * The returned URL must be revoked with URL.revokeObjectURL() when no longer needed.
  */
 export async function fetchDocumentFileBlob(documentId: string): Promise<string> {
-  const response = await api.get(`/documents/${documentId}/file`, { responseType: 'blob' })
+  const response = await api.get(`/documents/${documentId}/file`, {
+    responseType: 'blob',
+    timeout: 120_000,
+  })
   return URL.createObjectURL(response.data)
 }
 
@@ -125,7 +128,7 @@ export async function fetchPageThumbnailBlob(
 ): Promise<string> {
   const response = await api.get(
     `/documents/${documentId}/pages/${pageNumber}/thumbnail?width=${width}`,
-    { responseType: 'blob' },
+    { responseType: 'blob', timeout: 120_000 },
   )
   return URL.createObjectURL(response.data)
 }
