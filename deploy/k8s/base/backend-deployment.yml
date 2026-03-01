@@ -30,7 +30,8 @@ spec:
             - name: data
               mountPath: /app/data
             - name: config
-              mountPath: /app/config
+              mountPath: /app/config/parser.yml
+              subPath: parser.yml
           livenessProbe:
             httpGet:
               path: /health

@@ -104,3 +104,31 @@ export function getDocumentFileUrl(documentId: string): string {
 export function getPageThumbnailUrl(documentId: string, pageNumber: number, width = 300): string {
   return `/api/v1/documents/${documentId}/pages/${pageNumber}/thumbnail?width=${width}`
 }
+
+/**
+ * Fetch a document file as an authenticated blob URL.
+ * The returned URL must be revoked with URL.revokeObjectURL() when no longer needed.
+ */
+export async function fetchDocumentFileBlob(documentId: string): Promise<string> {
+  const response = await api.get(`/documents/${documentId}/file`, {
+    responseType: 'blob',
+    timeout: 120_000,
+  })
+  return URL.createObjectURL(response.data)
+}
+
+/**
+ * Fetch a page thumbnail as an authenticated blob URL.
+ * The returned URL must be revoked with URL.revokeObjectURL() when no longer needed.
+ */
+export async function fetchPageThumbnailBlob(
+  documentId: string,
+  pageNumber: number,
+  width = 300,
+): Promise<string> {
+  const response = await api.get(
+    `/documents/${documentId}/pages/${pageNumber}/thumbnail?width=${width}`,
+    { responseType: 'blob', timeout: 120_000 },
+  )
+  return URL.createObjectURL(response.data)
+}
