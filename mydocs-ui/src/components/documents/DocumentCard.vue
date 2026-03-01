@@ -63,14 +63,13 @@ const statusBadgeStyle = computed(() => {
     <!-- Thumbnail -->
     <div class="w-full h-48 overflow-hidden" style="background-color: var(--color-bg-tertiary);">
       <img
+        v-if="thumbnailUrl"
         :src="thumbnailUrl"
         :alt="document.original_file_name"
         class="w-full h-full object-contain object-top"
-        loading="lazy"
-        @error="($event.target as HTMLImageElement).style.display = 'none'"
       />
       <!-- Fallback icon when no thumbnail -->
-      <div class="w-full h-full flex items-center justify-center">
+      <div v-else class="w-full h-full flex items-center justify-center">
         <FileText :size="32" style="color: var(--color-text-secondary); opacity: 0.3;" />
       </div>
     </div>
