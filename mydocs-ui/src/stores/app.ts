@@ -22,7 +22,12 @@ export const useAppStore = defineStore('app', () => {
   // Viewer mode & tabs
   const viewerMode = ref<ViewerMode>('document')
   const viewerActiveDocumentTab = ref<DocumentViewerTab>('pdf')
-  const viewerActivePageTab = ref<PageViewerTab>('page-view')
+  const viewerActivePageTab = ref<PageViewerTab>('pdf')
+
+  // Elements display
+  const elementsDisplayActive = ref(false)
+  const elementsDisplayExpanded = ref(false)
+  const activeElementId = ref<string | null>(null)
 
   // Search viewer context
   const viewerHighlightQuery = ref('')
@@ -61,14 +66,14 @@ export const useAppStore = defineStore('app', () => {
     if (modeParam === 'document') {
       viewerActiveDocumentTab.value = 'pdf'
     } else {
-      viewerActivePageTab.value = 'page-view'
+      viewerActivePageTab.value = 'pdf'
     }
   }
 
   function switchToPageMode(pageNumber: number) {
     viewerMode.value = 'page'
     viewerPage.value = pageNumber
-    viewerActivePageTab.value = 'page-view'
+    viewerActivePageTab.value = 'pdf'
   }
 
   function switchToDocumentMode() {
@@ -85,7 +90,26 @@ export const useAppStore = defineStore('app', () => {
     viewerCurrentResultIndex.value = 0
     viewerMode.value = 'document'
     viewerActiveDocumentTab.value = 'pdf'
-    viewerActivePageTab.value = 'page-view'
+    viewerActivePageTab.value = 'pdf'
+    elementsDisplayActive.value = false
+    elementsDisplayExpanded.value = false
+    activeElementId.value = null
+  }
+
+  function toggleElementsDisplay() {
+    elementsDisplayActive.value = !elementsDisplayActive.value
+    if (!elementsDisplayActive.value) {
+      elementsDisplayExpanded.value = false
+      activeElementId.value = null
+    }
+  }
+
+  function toggleElementsExpanded() {
+    elementsDisplayExpanded.value = !elementsDisplayExpanded.value
+  }
+
+  function setActiveElement(id: string | null) {
+    activeElementId.value = id
   }
 
   function setViewerSearchContext(results: SearchResult[], query: string, startIndex: number) {
@@ -124,9 +148,11 @@ export const useAppStore = defineStore('app', () => {
     viewerOpen, viewerDocumentId, viewerPage, activeTab, galleryViewMode,
     viewerMode, viewerActiveDocumentTab, viewerActivePageTab,
     viewerHighlightQuery, viewerSearchResults, viewerCurrentResultIndex,
+    elementsDisplayActive, elementsDisplayExpanded, activeElementId,
     toggleMode, setTheme, applyTheme, toggleSidebar,
     openViewer, closeViewer, switchToPageMode, switchToDocumentMode,
     setViewerSearchContext, nextSearchResult, prevSearchResult,
+    toggleElementsDisplay, toggleElementsExpanded, setActiveElement,
   }
 }, {
   persist: {

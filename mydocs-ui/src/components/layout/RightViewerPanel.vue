@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { computed, watch, onBeforeUnmount } from 'vue'
+import { computed, watch, onBeforeUnmount, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useResponsive } from '@/composables/useResponsive'
 import { useDocumentViewer } from '@/composables/useDocumentViewer'
+import { useElementDisplay } from '@/composables/useElementDisplay'
 import DocumentViewer from '@/components/viewer/DocumentViewer.vue'
 import MarkdownViewer from '@/components/viewer/MarkdownViewer.vue'
 import HtmlViewer from '@/components/viewer/HtmlViewer.vue'
-import PageImageViewer from '@/components/viewer/PageImageViewer.vue'
-import { X, Maximize2, ChevronLeft, ChevronRight, Info, FileText, ArrowLeft } from 'lucide-vue-next'
-import { ref } from 'vue'
+import SplitViewContainer from '@/components/viewer/SplitViewContainer.vue'
+import ElementAnnotationOverlay from '@/components/viewer/ElementAnnotationOverlay.vue'
+import ElementBrowser from '@/components/viewer/ElementBrowser.vue'
+import { X, Maximize2, Minimize2, ChevronLeft, ChevronRight, Info, FileText, ArrowLeft, Layers } from 'lucide-vue-next'
 
 const panelWidth = defineModel<number>('panelWidth', { default: 420 })
 
@@ -56,7 +58,7 @@ const documentTabs = [
 ]
 
 const pageTabs = [
-  { key: 'page-view' as const, label: 'Page View' },
+  { key: 'pdf' as const, label: 'PDF' },
   { key: 'html' as const, label: 'HTML' },
   { key: 'markdown' as const, label: 'Markdown' },
 ]
@@ -75,7 +77,7 @@ function setActiveTab(key: string) {
   if (appStore.viewerMode === 'document') {
     appStore.viewerActiveDocumentTab = key as 'pdf' | 'markdown'
   } else {
-    appStore.viewerActivePageTab = key as 'page-view' | 'html' | 'markdown'
+    appStore.viewerActivePageTab = key as 'pdf' | 'html' | 'markdown'
   }
 }
 
@@ -109,6 +111,24 @@ const searchResultLabel = computed(() => {
   return `Result ${appStore.viewerCurrentResultIndex + 1} of ${appStore.viewerSearchResults.length}`
 })
 
+// Element display
+const elementsRef = computed(() => viewer.document.value?.elements || [])
+const { annotations } = useElementDisplay(elementsRef, viewer.pages, viewer.currentPage)
+
+const hasElements = computed(() => (viewer.document.value?.elements?.length || 0) > 0)
+
+const showElementsDisplay = computed(() =>
+  appStore.elementsDisplayActive && activeTabKey.value === 'pdf'
+)
+
+function handleElementSelect(elementId: string) {
+  appStore.setActiveElement(elementId)
+  const el = viewer.document.value?.elements?.find(e => e.id === elementId)
+  if (el && el.page_number !== viewer.currentPage.value) {
+    viewer.goToPage(el.page_number)
+  }
+}
+
 // Handle go-to-page from markdown viewer (switch to page mode)
 function handleGoToPage(page: number) {
   appStore.switchToPageMode(page)
@@ -141,19 +161,31 @@ onBeforeUnmount(() => {
       </h3>
       <div class="flex items-center gap-1">
         <button
+          v-if="hasElements"
+          @click="appStore.toggleElementsDisplay()"
+          class="p-1 rounded hover:opacity-70"
+          :style="{ color: appStore.elementsDisplayActive ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
+          title="Display Elements"
+        >
+          <Layers :size="16" />
+        </button>
+        <button
+          v-if="appStore.elementsDisplayActive"
+          @click="appStore.toggleElementsExpanded()"
+          class="p-1 rounded hover:opacity-70"
+          style="color: var(--color-text-secondary);"
+          :title="appStore.elementsDisplayExpanded ? 'Collapse' : 'Expand'"
+        >
+          <Minimize2 v-if="appStore.elementsDisplayExpanded" :size="16" />
+          <Maximize2 v-else :size="16" />
+        </button>
+        <button
           @click="showInfoPanel = !showInfoPanel"
           class="p-1 rounded hover:opacity-70"
           :style="{ color: showInfoPanel ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
           title="Document Info"
         >
           <Info :size="16" />
-        </button>
-        <button
-          class="p-1 rounded hover:opacity-70"
-          style="color: var(--color-text-secondary);"
-          title="Maximize"
-        >
-          <Maximize2 :size="16" />
         </button>
         <button
           @click="appStore.closeViewer()"
@@ -190,8 +222,46 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else-if="viewer.document.value">
-        <!-- DOCUMENT MODE -->
-        <template v-if="appStore.viewerMode === 'document'">
+        <!-- PDF with Elements Display split view -->
+        <template v-if="showElementsDisplay && activeTabKey === 'pdf'">
+          <SplitViewContainer
+            :direction="appStore.elementsDisplayExpanded ? 'vertical' : 'horizontal'"
+            :initial-ratio="0.6"
+            class="h-full"
+          >
+            <template #first>
+              <div class="relative h-full">
+                <DocumentViewer
+                  :document="viewer.document.value"
+                  :current-page="viewer.currentPage.value"
+                  :zoom="viewer.zoom.value"
+                  :file-url="viewer.fileUrl.value"
+                  :highlight-query="appStore.viewerHighlightQuery"
+                  @go-to-page="viewer.goToPage"
+                  @total-pages-resolved="onTotalPagesResolved"
+                  class="h-full"
+                />
+                <ElementAnnotationOverlay
+                  :annotations="annotations"
+                  :active-element-id="appStore.activeElementId"
+                  @select="handleElementSelect"
+                />
+              </div>
+            </template>
+            <template #second>
+              <ElementBrowser
+                :elements="viewer.document.value.elements || []"
+                :current-page="viewer.currentPage.value"
+                :active-element-id="appStore.activeElementId"
+                @select="handleElementSelect"
+                @go-to-page="viewer.goToPage"
+              />
+            </template>
+          </SplitViewContainer>
+        </template>
+
+        <!-- DOCUMENT MODE (normal) -->
+        <template v-else-if="appStore.viewerMode === 'document'">
           <!-- PDF tab -->
           <DocumentViewer
             v-if="appStore.viewerActiveDocumentTab === 'pdf'"
@@ -213,13 +283,18 @@ onBeforeUnmount(() => {
           />
         </template>
 
-        <!-- PAGE MODE -->
+        <!-- PAGE MODE (normal) -->
         <template v-else>
-          <!-- Page View tab -->
-          <PageImageViewer
-            v-if="appStore.viewerActivePageTab === 'page-view'"
-            :document-id="viewer.document.value.id"
-            :page-number="viewer.currentPage.value"
+          <!-- PDF tab -->
+          <DocumentViewer
+            v-if="appStore.viewerActivePageTab === 'pdf'"
+            :document="viewer.document.value"
+            :current-page="viewer.currentPage.value"
+            :zoom="viewer.zoom.value"
+            :file-url="viewer.fileUrl.value"
+            :highlight-query="appStore.viewerHighlightQuery"
+            @go-to-page="viewer.goToPage"
+            @total-pages-resolved="onTotalPagesResolved"
             class="h-full"
           />
           <!-- HTML tab -->
