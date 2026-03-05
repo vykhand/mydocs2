@@ -46,6 +46,7 @@ Use specialized agents for parallel, scoped work:
 - **backend-dev**: Works on Python backend code (FastAPI routes, services, models). Reads `docs/specs/backend.md` first.
 - **frontend-dev**: Works on Vue/TypeScript frontend code. Reads `docs/specs/UI.md` first.
 - **test-runner**: Runs `uv run pytest tests/` and `cd mydocs-ui && npm run lint` after changes, reports results.
+- **cli-tester**: After implementation, runs relevant `uv run mydocs` CLI commands end-to-end to validate changes work.
 
 ## Skills
 
@@ -53,6 +54,7 @@ Use specialized agents for parallel, scoped work:
 - **/sync-docs**: After implementation, scan changed files and update corresponding documentation.
 - **/add-endpoint**: Scaffold a new API endpoint: route, models, spec entry, openapi.yaml update, and frontend API client.
 - **/add-extractor**: Scaffold a new extraction schema under `mydocs/extracting/schemas/` with config YAML.
+- **/cli**: Run a `mydocs` CLI command. Usage: `/cli <command> [args]` → executes `uv run mydocs <command> [args]`.
 
 ## Code Conventions
 - Backend: snake_case, Pydantic models for all data, async route handlers
