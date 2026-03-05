@@ -55,9 +55,3 @@ Use specialized agents for parallel, scoped work:
 - **/add-endpoint**: Scaffold a new API endpoint: route, models, spec entry, openapi.yaml update, and frontend API client.
 - **/add-extractor**: Scaffold a new extraction schema under `mydocs/extracting/schemas/` with config YAML.
 - **/cli**: Run a `mydocs` CLI command. Usage: `/cli <command> [args]` → executes `uv run mydocs <command> [args]`.
-
-## Code Conventions
-- Backend: snake_case, Pydantic models for all data, async route handlers
-- Frontend: PascalCase components, composables in `src/composables/`, Pinia stores
-- All API routes under `/api/v1`, grouped by domain in `mydocs/backend/routes/`
-- Config-driven extraction schemas in `config/extracting/`
