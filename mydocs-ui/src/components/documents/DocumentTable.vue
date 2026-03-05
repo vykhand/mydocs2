@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useDocumentsStore } from '@/stores/documents'
+import { useAppStore } from '@/stores/app'
 import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
 import { Eye, Play, Trash2 } from 'lucide-vue-next'
 import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
@@ -9,9 +10,11 @@ import { formatFileSize, getDisplayStatus } from '@/utils/format'
 import { useToast } from 'vue-toastification'
 import { ref, computed } from 'vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import type { Document } from '@/types'
 
 const router = useRouter()
 const docsStore = useDocumentsStore()
+const appStore = useAppStore()
 const toast = useToast()
 const deleteTarget = ref<string | null>(null)
 
@@ -36,6 +39,14 @@ async function handleDelete() {
     deleteTarget.value = null
     docsStore.fetchDocuments()
   } catch { /* interceptor */ }
+}
+
+function handleRowClick(doc: Document) {
+  if ((doc.subdocuments?.length ?? 0) > 0) {
+    appStore.enterSubdocView(doc)
+  } else {
+    router.push(`/doc/${doc.id}`)
+  }
 }
 
 const allSelected = () => docsStore.documents.every(d => docsStore.selectedIds.has(d.id))
@@ -83,7 +94,7 @@ const statusBadgeColors: Record<string, { bg: string; text: string }> = {
           :key="doc.id"
           class="border-t cursor-pointer hover:opacity-90 transition-opacity"
           style="border-color: var(--color-border);"
-          @click="router.push(`/doc/${doc.id}`)"
+          @click="handleRowClick(doc)"
         >
           <td class="px-3 py-3" @click.stop>
             <input

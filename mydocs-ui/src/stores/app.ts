@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import type { SearchResult, ViewerMode, DocumentViewerTab, PageViewerTab } from '@/types'
+import type { Document, SearchResult, ViewerMode, DocumentViewerTab, PageViewerTab } from '@/types'
 
 export type AppMode = 'simple' | 'advanced'
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -28,6 +28,10 @@ export const useAppStore = defineStore('app', () => {
   const elementsDisplayActive = ref(false)
   const elementsDisplayExpanded = ref(false)
   const activeElementId = ref<string | null>(null)
+
+  // Subdocument drill-down
+  const subdocViewParentId = ref<string | null>(null)
+  const subdocViewParentDoc = ref<Document | null>(null)
 
   // Search viewer context
   const viewerHighlightQuery = ref('')
@@ -112,6 +116,16 @@ export const useAppStore = defineStore('app', () => {
     activeElementId.value = id
   }
 
+  function enterSubdocView(doc: Document) {
+    subdocViewParentId.value = doc.id
+    subdocViewParentDoc.value = doc
+  }
+
+  function exitSubdocView() {
+    subdocViewParentId.value = null
+    subdocViewParentDoc.value = null
+  }
+
   function setViewerSearchContext(results: SearchResult[], query: string, startIndex: number) {
     viewerSearchResults.value = results
     viewerHighlightQuery.value = query
@@ -149,10 +163,12 @@ export const useAppStore = defineStore('app', () => {
     viewerMode, viewerActiveDocumentTab, viewerActivePageTab,
     viewerHighlightQuery, viewerSearchResults, viewerCurrentResultIndex,
     elementsDisplayActive, elementsDisplayExpanded, activeElementId,
+    subdocViewParentId, subdocViewParentDoc,
     toggleMode, setTheme, applyTheme, toggleSidebar,
     openViewer, closeViewer, switchToPageMode, switchToDocumentMode,
     setViewerSearchContext, nextSearchResult, prevSearchResult,
     toggleElementsDisplay, toggleElementsExpanded, setActiveElement,
+    enterSubdocView, exitSubdocView,
   }
 }, {
   persist: {
