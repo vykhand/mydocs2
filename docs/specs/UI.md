@@ -226,6 +226,22 @@ All filter changes sync to URL query params via `router.replace()`, enabling boo
 | Result controls          | `top_k` input (default 10), `min_score` slider (0.0 – 1.0), `include_content_fields` multi-select. |
 | Score breakdown          | Each result card shows individual fulltext and vector scores alongside the combined score. |
 
+#### Sub-document Drill-down
+
+When a document with sub-documents (from Split & Classify) is clicked, the middle content area transitions from the document gallery to a **sub-document view** showing the selected document's sub-documents.
+
+| Element              | Description |
+|----------------------|-------------|
+| Breadcrumb header    | Shows "Documents / {document name}" breadcrumb. Clicking "Documents" returns to the document gallery. A back-arrow button also returns to the gallery. |
+| Sub-document count   | Displays the total number of sub-documents. |
+| Gallery (grid) mode  | `SubDocumentCard` cards arranged in a responsive grid. Each card shows: thumbnail of the first page in the sub-document, a prominent **document type label/badge** (e.g., "Invoice", "Contract"), page range (e.g., "Pages 1–3"), and creation date. |
+| List mode            | `SubDocumentGrid` in list mode renders sub-documents **grouped by document type**. Each group has a collapsible header showing the type name and count. Within each group, sub-documents are listed as rows with type badge, page range, and date. |
+| Click behavior       | Clicking a sub-document card opens the Right Viewer Panel in **document mode** at the first page of that sub-document. |
+
+**State**: The app store tracks `subdocViewParentId` (the document whose sub-documents are displayed) and `subdocViewParentDoc` (the full Document object). Setting `subdocViewParentId` to `null` returns to the document gallery.
+
+**Components**: `SubDocumentCard.vue` (gallery card with type label), `SubDocumentGrid.vue` (grid/grouped-list container).
+
 #### API Integration
 
 - **Document listing**: `GET /api/v1/documents` with filter/sort/pagination params from the documents store.

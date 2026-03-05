@@ -6,6 +6,7 @@ import { useDocumentsStore } from '@/stores/documents'
 import { useSearchStore } from '@/stores/search'
 import GalleryToolbar from '@/components/gallery/GalleryToolbar.vue'
 import DocumentGrid from '@/components/gallery/DocumentGrid.vue'
+import SubDocumentGrid from '@/components/documents/SubDocumentGrid.vue'
 import PageResultsGrid from '@/components/search/PageResultsGrid.vue'
 import UploadModal from '@/components/gallery/UploadModal.vue'
 import SettingsDrawer from '@/components/gallery/SettingsDrawer.vue'
@@ -13,6 +14,7 @@ import BulkActionsBar from '@/components/documents/BulkActionsBar.vue'
 import PaginationBar from '@/components/common/PaginationBar.vue'
 import LoadingSkeleton from '@/components/common/LoadingSkeleton.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import type { SubDocument } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +25,17 @@ const searchStore = useSearchStore()
 const hasSearchQuery = computed(() => !!route.query.q)
 const showUploadModal = computed(() => route.meta.modal === 'upload')
 const showSettingsDrawer = computed(() => route.meta.modal === 'settings')
+const showSubdocView = computed(() => appStore.subdocViewParentDoc !== null)
+
+function handleOpenSubdoc(subdoc: SubDocument) {
+  const firstPage = subdoc.page_refs?.length
+    ? subdoc.page_refs.reduce((min, r) => r.page_number < min.page_number ? r : min, subdoc.page_refs[0])
+    : null
+  const parentId = appStore.subdocViewParentDoc?.id
+  if (parentId) {
+    appStore.openViewer(parentId, firstPage?.page_number ?? 1)
+  }
+}
 
 // Sync URL filters to store
 function syncUrlToStore() {
@@ -95,8 +108,17 @@ onMounted(() => {
     <!-- Bulk actions -->
     <BulkActionsBar v-if="docsStore.selectedIds.size > 0" />
 
+    <!-- Sub-document drill-down mode -->
+    <template v-if="showSubdocView">
+      <SubDocumentGrid
+        :parent-document="appStore.subdocViewParentDoc!"
+        @back="appStore.exitSubdocView()"
+        @open-subdoc="handleOpenSubdoc"
+      />
+    </template>
+
     <!-- Search results mode -->
-    <template v-if="hasSearchQuery">
+    <template v-else-if="hasSearchQuery">
       <LoadingSkeleton v-if="searchStore.loading" />
       <PageResultsGrid
         v-else-if="searchStore.response && searchStore.response.results.length"
