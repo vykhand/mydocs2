@@ -211,8 +211,10 @@ __marimo__/
 # Kubernetes overlay secrets (user-managed, contain credentials)
 deploy/k8s/overlays/*/secret.yml
 
-#CLAUDE
-.claude/
+#CLAUDE - ignore everything except skills and agents
+.claude/*
+!.claude/skills/
+!.claude/agents/
 data/**
 config/**/attribute_manifest.yaml
 config/**/prompt_manifest.yaml
