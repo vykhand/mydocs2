@@ -5,6 +5,7 @@ import FileTypeBadge from '@/components/common/FileTypeBadge.vue'
 import AddToCaseMenu from '@/components/cases/AddToCaseMenu.vue'
 import { fetchPageThumbnailBlob } from '@/api/documents'
 import { formatFileSize, getDisplayStatus } from '@/utils/format'
+import { useAppStore } from '@/stores/app'
 import { FileText, Files, Layers, Check } from 'lucide-vue-next'
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   toggleSelect: []
 }>()
 
+const appStore = useAppStore()
 const thumbnailUrl = ref('')
 const displayStatus = computed(() => getDisplayStatus(props.document))
 
@@ -58,7 +60,7 @@ const statusBadgeStyle = computed(() => {
       borderColor: selected ? 'var(--color-accent)' : 'var(--color-border)',
       backgroundColor: selected ? 'var(--color-accent-bg, rgba(59,130,246,0.05))' : 'var(--color-bg-secondary)',
     }"
-    @click="$router.push(`/doc/${document.id}`)"
+    @click="subDocCount > 0 ? appStore.enterSubdocView(document) : $router.push(`/doc/${document.id}`)"
   >
     <!-- Thumbnail -->
     <div class="w-full h-48 overflow-hidden" style="background-color: var(--color-bg-tertiary);">

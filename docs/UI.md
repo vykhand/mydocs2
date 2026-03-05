@@ -629,6 +629,7 @@ These user stories reflect what is **actually working** in the current codebase,
 | US-DOC-7 | As a user, I can bookmark filtered/sorted views because filters sync to URL params. | Working |
 | US-DOC-8 | As a user, I can select multiple documents and perform bulk actions (parse, tag, delete, assign to case). | Working |
 | US-DOC-9 | As a user, I can click a document card to open it in the right viewer panel. | Working |
+| US-DOC-10 | As a user, when I click a document that has sub-documents, the gallery drills down to show its sub-documents with type labels (grid) or grouped by type (list). | Working |
 
 ### Document Viewing
 
