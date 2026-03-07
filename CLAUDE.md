@@ -19,7 +19,13 @@ Before ANY work, read the relevant docs based on your task:
 | DB Migrations | — | `docs/specs/migrations.md` | No doc yet — spec only |
 | API Contract | `openapi.yaml` | — | |
 
+## Planning Protocol
+
+1. Every plan must include a spec update step before implementation and a documentation update step after.
+2. Before coding starts, first write the plan in the docs/claude_plans_archive as <YYYYMMDD>_<NN>_<short_plan_name>.md 
+
 ## Change Protocol
+
 1. **Before coding**: Read relevant spec(s) from the table above. Update the spec with your planned changes.
 2. **Implement**: Make code changes following the spec.
 3. **After coding**: Update the corresponding `docs/` documentation to reflect what changed.
