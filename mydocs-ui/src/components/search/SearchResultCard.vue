@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import type { SearchResult } from '@/types'
+import { getDocument } from '@/api/documents'
 import ScoreBreakdown from './ScoreBreakdown.vue'
 import { FileText, Eye } from 'lucide-vue-next'
 
@@ -11,6 +12,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 
 const scorePct = computed(() => Math.round(props.result.score * 100))
@@ -19,13 +21,31 @@ const snippet = computed(() => {
   const text = props.result.content_markdown || props.result.content || ''
   return text.length > 300 ? text.substring(0, 300) + '...' : text
 })
+
+async function handleClick() {
+  const docId = props.result.document_id
+  const highlight = (route.query.q as string) || ''
+  const page = props.result.page_number || 1
+  appStore.openViewer(docId, page, highlight, 'page')
+  router.push(`/doc/${docId}?page=${page}&highlight=${encodeURIComponent(highlight)}`)
+
+  try {
+    const doc = await getDocument(docId)
+    if (appStore.viewerDocumentId !== docId) return
+    if (doc.subdocuments?.length) {
+      appStore.enterSubdocView(doc, true)
+    }
+  } catch {
+    // Ignore — viewer already opened, subdoc view is optional
+  }
+}
 </script>
 
 <template>
   <div
     class="rounded-lg border p-4 cursor-pointer hover:shadow-sm transition-shadow"
     style="border-color: var(--color-border); background-color: var(--color-bg-secondary);"
-    @click="router.push(`/doc/${result.document_id}?page=${result.page_number || 1}&highlight=${encodeURIComponent($route.query.q as string || '')}`)"
+    @click="handleClick"
   >
     <div class="flex items-start justify-between gap-3 mb-2">
       <div class="flex items-center gap-2">
@@ -43,7 +63,7 @@ const snippet = computed(() => {
         </div>
         <button
           v-if="result.page_number != null"
-          @click.stop="router.push(`/doc/${result.document_id}?page=${result.page_number}&highlight=${encodeURIComponent($route.query.q as string || '')}`)"
+          @click.stop="handleClick"
           class="p-1 rounded hover:opacity-70"
           style="color: var(--color-accent);"
           title="View in context"

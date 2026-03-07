@@ -32,6 +32,7 @@ export const useAppStore = defineStore('app', () => {
   // Subdocument drill-down
   const subdocViewParentId = ref<string | null>(null)
   const subdocViewParentDoc = ref<Document | null>(null)
+  const subdocViewFromSearch = ref(false)
 
   // Search viewer context
   const viewerHighlightQuery = ref('')
@@ -116,14 +117,16 @@ export const useAppStore = defineStore('app', () => {
     activeElementId.value = id
   }
 
-  function enterSubdocView(doc: Document) {
+  function enterSubdocView(doc: Document, fromSearch = false) {
     subdocViewParentId.value = doc.id
     subdocViewParentDoc.value = doc
+    subdocViewFromSearch.value = fromSearch
   }
 
   function exitSubdocView() {
     subdocViewParentId.value = null
     subdocViewParentDoc.value = null
+    subdocViewFromSearch.value = false
   }
 
   function setViewerSearchContext(results: SearchResult[], query: string, startIndex: number) {
@@ -163,7 +166,7 @@ export const useAppStore = defineStore('app', () => {
     viewerMode, viewerActiveDocumentTab, viewerActivePageTab,
     viewerHighlightQuery, viewerSearchResults, viewerCurrentResultIndex,
     elementsDisplayActive, elementsDisplayExpanded, activeElementId,
-    subdocViewParentId, subdocViewParentDoc,
+    subdocViewParentId, subdocViewParentDoc, subdocViewFromSearch,
     toggleMode, setTheme, applyTheme, toggleSidebar,
     openViewer, closeViewer, switchToPageMode, switchToDocumentMode,
     setViewerSearchContext, nextSearchResult, prevSearchResult,

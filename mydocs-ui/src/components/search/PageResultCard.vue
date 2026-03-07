@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import type { SearchResult } from '@/types'
-import { getPageThumbnailUrl } from '@/api/documents'
+import { getPageThumbnailUrl, getDocument } from '@/api/documents'
 import { FileText } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -27,14 +27,25 @@ const snippet = computed(() => {
   return text.length > 200 ? text.substring(0, 200) + '...' : text
 })
 
-function handleClick() {
+async function handleClick() {
+  const docId = props.result.document_id
   appStore.openViewer(
-    props.result.document_id,
+    docId,
     props.result.page_number || 1,
     (route.query.q as string) || '',
     'page'
   )
-  router.push(`/doc/${props.result.document_id}?page=${props.result.page_number || 1}&mode=page&highlight=${encodeURIComponent((route.query.q as string) || '')}`)
+  router.push(`/doc/${docId}?page=${props.result.page_number || 1}&mode=page&highlight=${encodeURIComponent((route.query.q as string) || '')}`)
+
+  try {
+    const doc = await getDocument(docId)
+    if (appStore.viewerDocumentId !== docId) return
+    if (doc.subdocuments?.length) {
+      appStore.enterSubdocView(doc, true)
+    }
+  } catch {
+    // Ignore — viewer already opened, subdoc view is optional
+  }
 }
 </script>
 

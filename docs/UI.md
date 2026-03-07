@@ -178,7 +178,7 @@ The `/upload` route renders GalleryView with `UploadModal` overlay — **matches
 | Active filter chips | Colored pills, click to remove | Implemented in SidebarNav | Match |
 | Pagination | Page size selector (25, 50, 100) + page navigation | PaginationBar component | Match |
 | Bulk actions bar | Appears on selection: Parse, Split & Classify, Add Tags, Assign to Case, Delete | BulkActionsBar with parse, split & classify (auto-parses unparsed docs), tag, delete, add-to-case | Match |
-| Search results | Page cards with thumbnails and snippets (grid mode), detailed result cards (list mode) | PageResultsGrid switches between PageResultCard grid and SearchResultCard list | Match |
+| Search results | Page cards with thumbnails and snippets (grid mode), detailed result cards (list mode) | PageResultsGrid switches between PageResultCard grid and SearchResultCard list. Clicking a result also enters sub-document drill-down if the parent document has sub-documents, with a "Search Results" breadcrumb to return. | Match |
 | Search debounce | 300ms in Top Bar | Debounced search input in TopBar | Match |
 | Filter sync to URL | `router.replace()` for bookmarkable views | Implemented via URL query param sync | Match |
 | **Filter sections collapsed by default** | Status, File Type start collapsed | **Need to verify default collapsed state** | Likely Match |
@@ -342,8 +342,9 @@ The viewer now operates in two modes:
 | elementsDisplayActive | boolean | boolean | Match |
 | elementsDisplayExpanded | boolean | boolean | Match |
 | activeElementId | `string \| null` | `string \| null` | Match |
+| subdocViewFromSearch | boolean | boolean | Match |
 
-Additional methods: `switchToPageMode(page)`, `switchToDocumentMode()`, `toggleElementsDisplay()`, `toggleElementsExpanded()`, `setActiveElement(id)`.
+Additional methods: `switchToPageMode(page)`, `switchToDocumentMode()`, `toggleElementsDisplay()`, `toggleElementsExpanded()`, `setActiveElement(id)`, `enterSubdocView(doc, fromSearch)`, `exitSubdocView()`.
 
 Persistence: `['mode', 'theme', 'sidebarCollapsed', 'activeTab', 'galleryViewMode']` — covers all spec requirements.
 
@@ -674,10 +675,11 @@ These user stories reflect what is **actually working** in the current codebase,
 | US-SRCH-2 | As a user, search is debounced (300ms) to avoid excessive API calls. | Working |
 | US-SRCH-3 | As a user, I can focus the search bar with Cmd+K or `/`. | Working |
 | US-SRCH-4 | As a user, search results show file name, page number, relevance score, and content snippet. | Working |
-| US-SRCH-5 | As a user, clicking a search result opens the viewer at the matched page with highlights. | Working |
+| US-SRCH-5 | As a user, clicking a search result opens the viewer at the matched page with highlights. If the parent document has sub-documents, the middle panel also shows the parent's sub-documents. | Working |
 | US-SRCH-6 | As a user (advanced), I can choose between fulltext, vector, and hybrid search modes. | Working |
 | US-SRCH-7 | As a user (advanced), I can configure search parameters (top_k, min_score, fuzzy, vector index). | Working |
 | US-SRCH-8 | As a user (advanced), I can see score breakdowns for each search result. | Working |
+| US-SRCH-9 | As a user, when I click a search result whose parent document has sub-documents, the middle panel shows the parent's sub-documents with a "Search Results / {name}" breadcrumb and a back button that returns me to search results. | Working |
 
 ### Cases
 

@@ -63,7 +63,7 @@ function formatDate(d?: string): string {
       <button
         class="p-1.5 rounded-lg hover:opacity-70 transition-opacity"
         style="color: var(--color-text-secondary);"
-        title="Back to documents"
+        :title="appStore.subdocViewFromSearch ? 'Back to search results' : 'Back to documents'"
         @click="emit('back')"
       >
         <ArrowLeft :size="20" />
@@ -74,7 +74,7 @@ function formatDate(d?: string): string {
           style="color: var(--color-accent);"
           @click="emit('back')"
         >
-          Documents
+          {{ appStore.subdocViewFromSearch ? 'Search Results' : 'Documents' }}
         </button>
         <span style="color: var(--color-text-secondary);">/</span>
         <span class="font-medium" style="color: var(--color-text-primary);">

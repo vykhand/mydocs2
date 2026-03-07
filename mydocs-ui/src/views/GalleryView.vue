@@ -33,7 +33,8 @@ function handleOpenSubdoc(subdoc: SubDocument) {
     : null
   const parentId = appStore.subdocViewParentDoc?.id
   if (parentId) {
-    appStore.openViewer(parentId, firstPage?.page_number ?? 1)
+    const highlight = appStore.subdocViewFromSearch ? (route.query.q as string) || '' : ''
+    appStore.openViewer(parentId, firstPage?.page_number ?? 1, highlight)
   }
 }
 

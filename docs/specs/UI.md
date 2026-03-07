@@ -175,7 +175,7 @@ The unified gallery serves as both the document browser and the search results v
 | Element              | Description |
 |----------------------|-------------|
 | Page results grid    | `PageResultsGrid` renders search results as **page cards** in a grid/list layout. Each card shows: page thumbnail (from thumbnail endpoint), document name, page number badge, text snippet with highlighted terms, relevance score, tags. |
-| Result actions       | Clicking a page result opens the Right Viewer Panel in **page mode** at the matched page with highlights. |
+| Result actions       | Clicking a page result opens the Right Viewer Panel in **page mode** at the matched page with highlights. If the parent document has sub-documents, the middle panel also enters the **sub-document drill-down view** showing the parent document's sub-documents, with a "Search Results" back button to return to search results. |
 
 Search is initiated from the **Top Bar search bar**, which debounces input by 300ms and updates the URL query parameter. The `GalleryView` watches `route.query` and uses `useSearchStore` for search execution, switching between document listing and page results accordingly.
 
@@ -228,17 +228,17 @@ All filter changes sync to URL query params via `router.replace()`, enabling boo
 
 #### Sub-document Drill-down
 
-When a document with sub-documents (from Split & Classify) is clicked, the middle content area transitions from the document gallery to a **sub-document view** showing the selected document's sub-documents.
+When a document with sub-documents (from Split & Classify) is clicked, the middle content area transitions from the document gallery to a **sub-document view** showing the selected document's sub-documents. The sub-document view can also be entered from **search results**: clicking a search result whose parent document has sub-documents will drill down into the parent's sub-documents.
 
 | Element              | Description |
 |----------------------|-------------|
-| Breadcrumb header    | Shows "Documents / {document name}" breadcrumb. Clicking "Documents" returns to the document gallery. A back-arrow button also returns to the gallery. |
+| Breadcrumb header    | Shows "Documents / {document name}" or "Search Results / {document name}" breadcrumb depending on entry point. Clicking the first segment returns to the document gallery or search results accordingly. A back-arrow button also returns to the previous view. |
 | Sub-document count   | Displays the total number of sub-documents. |
 | Gallery (grid) mode  | `SubDocumentCard` cards arranged in a responsive grid. Each card shows: thumbnail of the first page in the sub-document, a prominent **document type label/badge** (e.g., "Invoice", "Contract"), page range (e.g., "Pages 1–3"), and creation date. |
 | List mode            | `SubDocumentGrid` in list mode renders sub-documents **grouped by document type**. Each group has a collapsible header showing the type name and count. Within each group, sub-documents are listed as rows with type badge, page range, and date. |
 | Click behavior       | Clicking a sub-document card opens the Right Viewer Panel in **document mode** at the first page of that sub-document. |
 
-**State**: The app store tracks `subdocViewParentId` (the document whose sub-documents are displayed) and `subdocViewParentDoc` (the full Document object). Setting `subdocViewParentId` to `null` returns to the document gallery.
+**State**: The app store tracks `subdocViewParentId` (the document whose sub-documents are displayed), `subdocViewParentDoc` (the full Document object), and `subdocViewFromSearch` (boolean indicating whether the sub-document view was entered from search results). The `enterSubdocView(doc, fromSearch)` action sets all three; `exitSubdocView()` resets them. When `subdocViewFromSearch` is true, the breadcrumb shows "Search Results" instead of "Documents" and the back button returns to search results.
 
 **Components**: `SubDocumentCard.vue` (gallery card with type label), `SubDocumentGrid.vue` (grid/grouped-list container).
 
